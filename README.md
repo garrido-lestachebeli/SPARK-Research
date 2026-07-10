@@ -1,14 +1,14 @@
 # <u> SPARK-Research</u>
-Implementing Bayes Rule to Reinforcement Learning
+Implementing Bayes Rule to Reinforcement Learning in Stoccastic Paritally Observable Environments
 
 ## <u>Environments</u>
 
 ## Blackjack
 ```
-# Run 5 episodes, with a random policy and save them
+# Run 5 episodes, with a random policy and save them to the default episodes.json
 py Blackjack/main.py --count 5 --seed 42 --save
 ```
-Episodes are saved to episodes.json, and replay.py lets you preview the episodes
+Episodes are saved to episodes.json, and replay.py lets you preview the episodes and see what actions were taken
 
 ```
 #load the generic episodes.json
