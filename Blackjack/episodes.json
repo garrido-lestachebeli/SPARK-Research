@@ -1,0 +1,221 @@
+{
+  "version": 1,
+  "game": "Blackjack-v1",
+  "episode_count": 5,
+  "episodes": [
+    {
+      "seed": null,
+      "initial_state": {
+        "player_sum": 17,
+        "dealer_showing": 10,
+        "usable_ace": true
+      },
+      "steps": [
+        {
+          "step": 0,
+          "action": 0,
+          "action_name": "stick",
+          "state_before": {
+            "player_sum": 17,
+            "dealer_showing": 10,
+            "usable_ace": true
+          },
+          "state_after": {
+            "player_sum": 17,
+            "dealer_showing": 10,
+            "usable_ace": true
+          },
+          "reward": -1.0,
+          "terminated": true,
+          "truncated": false,
+          "info": {}
+        }
+      ],
+      "total_reward": -1.0,
+      "num_steps": 1,
+      "terminated": true,
+      "truncated": false,
+      "outcome": "loss",
+      "final_state": {
+        "player_sum": 17,
+        "dealer_showing": 10,
+        "usable_ace": true
+      }
+    },
+    {
+      "seed": null,
+      "initial_state": {
+        "player_sum": 14,
+        "dealer_showing": 4,
+        "usable_ace": true
+      },
+      "steps": [
+        {
+          "step": 0,
+          "action": 0,
+          "action_name": "stick",
+          "state_before": {
+            "player_sum": 14,
+            "dealer_showing": 4,
+            "usable_ace": true
+          },
+          "state_after": {
+            "player_sum": 14,
+            "dealer_showing": 4,
+            "usable_ace": true
+          },
+          "reward": -1.0,
+          "terminated": true,
+          "truncated": false,
+          "info": {}
+        }
+      ],
+      "total_reward": -1.0,
+      "num_steps": 1,
+      "terminated": true,
+      "truncated": false,
+      "outcome": "loss",
+      "final_state": {
+        "player_sum": 14,
+        "dealer_showing": 4,
+        "usable_ace": true
+      }
+    },
+    {
+      "seed": null,
+      "initial_state": {
+        "player_sum": 17,
+        "dealer_showing": 8,
+        "usable_ace": true
+      },
+      "steps": [
+        {
+          "step": 0,
+          "action": 0,
+          "action_name": "stick",
+          "state_before": {
+            "player_sum": 17,
+            "dealer_showing": 8,
+            "usable_ace": true
+          },
+          "state_after": {
+            "player_sum": 17,
+            "dealer_showing": 8,
+            "usable_ace": true
+          },
+          "reward": -1.0,
+          "terminated": true,
+          "truncated": false,
+          "info": {}
+        }
+      ],
+      "total_reward": -1.0,
+      "num_steps": 1,
+      "terminated": true,
+      "truncated": false,
+      "outcome": "loss",
+      "final_state": {
+        "player_sum": 17,
+        "dealer_showing": 8,
+        "usable_ace": true
+      }
+    },
+    {
+      "seed": null,
+      "initial_state": {
+        "player_sum": 14,
+        "dealer_showing": 10,
+        "usable_ace": false
+      },
+      "steps": [
+        {
+          "step": 0,
+          "action": 0,
+          "action_name": "stick",
+          "state_before": {
+            "player_sum": 14,
+            "dealer_showing": 10,
+            "usable_ace": false
+          },
+          "state_after": {
+            "player_sum": 14,
+            "dealer_showing": 10,
+            "usable_ace": false
+          },
+          "reward": 1.0,
+          "terminated": true,
+          "truncated": false,
+          "info": {}
+        }
+      ],
+      "total_reward": 1.0,
+      "num_steps": 1,
+      "terminated": true,
+      "truncated": false,
+      "outcome": "win",
+      "final_state": {
+        "player_sum": 14,
+        "dealer_showing": 10,
+        "usable_ace": false
+      }
+    },
+    {
+      "seed": null,
+      "initial_state": {
+        "player_sum": 13,
+        "dealer_showing": 2,
+        "usable_ace": false
+      },
+      "steps": [
+        {
+          "step": 0,
+          "action": 1,
+          "action_name": "hit",
+          "state_before": {
+            "player_sum": 13,
+            "dealer_showing": 2,
+            "usable_ace": false
+          },
+          "state_after": {
+            "player_sum": 16,
+            "dealer_showing": 2,
+            "usable_ace": false
+          },
+          "reward": 0.0,
+          "terminated": false,
+          "truncated": false,
+          "info": {}
+        },
+        {
+          "step": 1,
+          "action": 1,
+          "action_name": "hit",
+          "state_before": {
+            "player_sum": 16,
+            "dealer_showing": 2,
+            "usable_ace": false
+          },
+          "state_after": {
+            "player_sum": 23,
+            "dealer_showing": 2,
+            "usable_ace": false
+          },
+          "reward": -1.0,
+          "terminated": true,
+          "truncated": false,
+          "info": {}
+        }
+      ],
+      "total_reward": -1.0,
+      "num_steps": 2,
+      "terminated": true,
+      "truncated": false,
+      "outcome": "loss",
+      "final_state": {
+        "player_sum": 23,
+        "dealer_showing": 2,
+        "usable_ace": false
+      }
+    }
+  ]
+}
