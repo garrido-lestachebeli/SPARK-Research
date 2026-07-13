@@ -1,0 +1,1046 @@
+{
+  "version": 1,
+  "game": "leduc-holdem",
+  "episode_count": 5,
+  "episodes": [
+    {
+      "seed": 0,
+      "num_players": 2,
+      "initial_state": {
+        "hand": "SJ",
+        "public_card": null,
+        "my_chips": 1,
+        "all_chips": [
+          1,
+          2
+        ],
+        "current_player": 0,
+        "legal_actions": [
+          "call",
+          "raise",
+          "fold"
+        ]
+      },
+      "initial_perfect_info": {
+        "hand_cards": [
+          "SJ",
+          "HQ"
+        ],
+        "public_card": null,
+        "chips": [
+          1,
+          2
+        ],
+        "current_player": 0,
+        "current_round": 0,
+        "legal_actions": [
+          "call",
+          "raise",
+          "fold"
+        ]
+      },
+      "steps": [
+        {
+          "step": 0,
+          "player_id": 0,
+          "action": 1,
+          "action_name": "raise",
+          "state_before": {
+            "hand": "SJ",
+            "public_card": null,
+            "my_chips": 1,
+            "all_chips": [
+              1,
+              2
+            ],
+            "current_player": 0,
+            "legal_actions": [
+              "call",
+              "raise",
+              "fold"
+            ]
+          },
+          "state_after": {
+            "hand": "HQ",
+            "public_card": null,
+            "my_chips": 2,
+            "all_chips": [
+              4,
+              2
+            ],
+            "current_player": 1,
+            "legal_actions": [
+              "call",
+              "raise",
+              "fold"
+            ]
+          },
+          "legal_actions": [
+            "call",
+            "raise",
+            "fold"
+          ],
+          "perfect_info": {
+            "hand_cards": [
+              "SJ",
+              "HQ"
+            ],
+            "public_card": null,
+            "chips": [
+              4,
+              2
+            ],
+            "current_player": 1,
+            "current_round": 0,
+            "legal_actions": [
+              "call",
+              "raise",
+              "fold"
+            ]
+          },
+          "info": {}
+        },
+        {
+          "step": 1,
+          "player_id": 1,
+          "action": 1,
+          "action_name": "raise",
+          "state_before": {
+            "hand": "HQ",
+            "public_card": null,
+            "my_chips": 2,
+            "all_chips": [
+              4,
+              2
+            ],
+            "current_player": 1,
+            "legal_actions": [
+              "call",
+              "raise",
+              "fold"
+            ]
+          },
+          "state_after": {
+            "hand": "SJ",
+            "public_card": null,
+            "my_chips": 4,
+            "all_chips": [
+              4,
+              6
+            ],
+            "current_player": 0,
+            "legal_actions": [
+              "call",
+              "fold"
+            ]
+          },
+          "legal_actions": [
+            "call",
+            "raise",
+            "fold"
+          ],
+          "perfect_info": {
+            "hand_cards": [
+              "SJ",
+              "HQ"
+            ],
+            "public_card": null,
+            "chips": [
+              4,
+              6
+            ],
+            "current_player": 0,
+            "current_round": 0,
+            "legal_actions": [
+              "call",
+              "fold"
+            ]
+          },
+          "info": {}
+        },
+        {
+          "step": 2,
+          "player_id": 0,
+          "action": 2,
+          "action_name": "fold",
+          "state_before": {
+            "hand": "SJ",
+            "public_card": null,
+            "my_chips": 4,
+            "all_chips": [
+              4,
+              6
+            ],
+            "current_player": 0,
+            "legal_actions": [
+              "call",
+              "fold"
+            ]
+          },
+          "state_after": {},
+          "legal_actions": [
+            "call",
+            "fold"
+          ],
+          "perfect_info": {
+            "hand_cards": [
+              "SJ",
+              "HQ"
+            ],
+            "public_card": null,
+            "chips": [
+              4,
+              6
+            ],
+            "current_player": 1,
+            "current_round": 0,
+            "legal_actions": [
+              "fold",
+              "check"
+            ]
+          },
+          "info": {}
+        }
+      ],
+      "payoffs": [
+        -2.0,
+        2.0
+      ],
+      "num_steps": 3,
+      "outcomes": [
+        "loss",
+        "win"
+      ],
+      "winner": 1,
+      "final_perfect_info": {
+        "hand_cards": [
+          "SJ",
+          "HQ"
+        ],
+        "public_card": null,
+        "chips": [
+          4,
+          6
+        ],
+        "current_player": 1,
+        "current_round": 0,
+        "legal_actions": [
+          "fold",
+          "check"
+        ]
+      }
+    },
+    {
+      "seed": 1,
+      "num_players": 2,
+      "initial_state": {
+        "hand": "HK",
+        "public_card": null,
+        "my_chips": 1,
+        "all_chips": [
+          1,
+          2
+        ],
+        "current_player": 0,
+        "legal_actions": [
+          "call",
+          "raise",
+          "fold"
+        ]
+      },
+      "initial_perfect_info": {
+        "hand_cards": [
+          "HK",
+          "SJ"
+        ],
+        "public_card": null,
+        "chips": [
+          1,
+          2
+        ],
+        "current_player": 0,
+        "current_round": 0,
+        "legal_actions": [
+          "call",
+          "raise",
+          "fold"
+        ]
+      },
+      "steps": [
+        {
+          "step": 0,
+          "player_id": 0,
+          "action": 0,
+          "action_name": "call",
+          "state_before": {
+            "hand": "HK",
+            "public_card": null,
+            "my_chips": 1,
+            "all_chips": [
+              1,
+              2
+            ],
+            "current_player": 0,
+            "legal_actions": [
+              "call",
+              "raise",
+              "fold"
+            ]
+          },
+          "state_after": {
+            "hand": "SJ",
+            "public_card": null,
+            "my_chips": 2,
+            "all_chips": [
+              2,
+              2
+            ],
+            "current_player": 1,
+            "legal_actions": [
+              "raise",
+              "fold",
+              "check"
+            ]
+          },
+          "legal_actions": [
+            "call",
+            "raise",
+            "fold"
+          ],
+          "perfect_info": {
+            "hand_cards": [
+              "HK",
+              "SJ"
+            ],
+            "public_card": null,
+            "chips": [
+              2,
+              2
+            ],
+            "current_player": 1,
+            "current_round": 0,
+            "legal_actions": [
+              "raise",
+              "fold",
+              "check"
+            ]
+          },
+          "info": {}
+        },
+        {
+          "step": 1,
+          "player_id": 1,
+          "action": 2,
+          "action_name": "fold",
+          "state_before": {
+            "hand": "SJ",
+            "public_card": null,
+            "my_chips": 2,
+            "all_chips": [
+              2,
+              2
+            ],
+            "current_player": 1,
+            "legal_actions": [
+              "raise",
+              "fold",
+              "check"
+            ]
+          },
+          "state_after": {},
+          "legal_actions": [
+            "raise",
+            "fold",
+            "check"
+          ],
+          "perfect_info": {
+            "hand_cards": [
+              "HK",
+              "SJ"
+            ],
+            "public_card": null,
+            "chips": [
+              2,
+              2
+            ],
+            "current_player": 0,
+            "current_round": 0,
+            "legal_actions": [
+              "raise",
+              "fold",
+              "check"
+            ]
+          },
+          "info": {}
+        }
+      ],
+      "payoffs": [
+        1.0,
+        -1.0
+      ],
+      "num_steps": 2,
+      "outcomes": [
+        "win",
+        "loss"
+      ],
+      "winner": 0,
+      "final_perfect_info": {
+        "hand_cards": [
+          "HK",
+          "SJ"
+        ],
+        "public_card": null,
+        "chips": [
+          2,
+          2
+        ],
+        "current_player": 0,
+        "current_round": 0,
+        "legal_actions": [
+          "raise",
+          "fold",
+          "check"
+        ]
+      }
+    },
+    {
+      "seed": 2,
+      "num_players": 2,
+      "initial_state": {
+        "hand": "SK",
+        "public_card": null,
+        "my_chips": 1,
+        "all_chips": [
+          1,
+          2
+        ],
+        "current_player": 0,
+        "legal_actions": [
+          "call",
+          "raise",
+          "fold"
+        ]
+      },
+      "initial_perfect_info": {
+        "hand_cards": [
+          "SK",
+          "SJ"
+        ],
+        "public_card": null,
+        "chips": [
+          1,
+          2
+        ],
+        "current_player": 0,
+        "current_round": 0,
+        "legal_actions": [
+          "call",
+          "raise",
+          "fold"
+        ]
+      },
+      "steps": [
+        {
+          "step": 0,
+          "player_id": 0,
+          "action": 1,
+          "action_name": "raise",
+          "state_before": {
+            "hand": "SK",
+            "public_card": null,
+            "my_chips": 1,
+            "all_chips": [
+              1,
+              2
+            ],
+            "current_player": 0,
+            "legal_actions": [
+              "call",
+              "raise",
+              "fold"
+            ]
+          },
+          "state_after": {
+            "hand": "SJ",
+            "public_card": null,
+            "my_chips": 2,
+            "all_chips": [
+              4,
+              2
+            ],
+            "current_player": 1,
+            "legal_actions": [
+              "call",
+              "raise",
+              "fold"
+            ]
+          },
+          "legal_actions": [
+            "call",
+            "raise",
+            "fold"
+          ],
+          "perfect_info": {
+            "hand_cards": [
+              "SK",
+              "SJ"
+            ],
+            "public_card": null,
+            "chips": [
+              4,
+              2
+            ],
+            "current_player": 1,
+            "current_round": 0,
+            "legal_actions": [
+              "call",
+              "raise",
+              "fold"
+            ]
+          },
+          "info": {}
+        },
+        {
+          "step": 1,
+          "player_id": 1,
+          "action": 2,
+          "action_name": "fold",
+          "state_before": {
+            "hand": "SJ",
+            "public_card": null,
+            "my_chips": 2,
+            "all_chips": [
+              4,
+              2
+            ],
+            "current_player": 1,
+            "legal_actions": [
+              "call",
+              "raise",
+              "fold"
+            ]
+          },
+          "state_after": {},
+          "legal_actions": [
+            "call",
+            "raise",
+            "fold"
+          ],
+          "perfect_info": {
+            "hand_cards": [
+              "SK",
+              "SJ"
+            ],
+            "public_card": null,
+            "chips": [
+              4,
+              2
+            ],
+            "current_player": 0,
+            "current_round": 0,
+            "legal_actions": [
+              "raise",
+              "fold",
+              "check"
+            ]
+          },
+          "info": {}
+        }
+      ],
+      "payoffs": [
+        1.0,
+        -1.0
+      ],
+      "num_steps": 2,
+      "outcomes": [
+        "win",
+        "loss"
+      ],
+      "winner": 0,
+      "final_perfect_info": {
+        "hand_cards": [
+          "SK",
+          "SJ"
+        ],
+        "public_card": null,
+        "chips": [
+          4,
+          2
+        ],
+        "current_player": 0,
+        "current_round": 0,
+        "legal_actions": [
+          "raise",
+          "fold",
+          "check"
+        ]
+      }
+    },
+    {
+      "seed": 3,
+      "num_players": 2,
+      "initial_state": {
+        "hand": "HQ",
+        "public_card": null,
+        "my_chips": 1,
+        "all_chips": [
+          1,
+          2
+        ],
+        "current_player": 0,
+        "legal_actions": [
+          "call",
+          "raise",
+          "fold"
+        ]
+      },
+      "initial_perfect_info": {
+        "hand_cards": [
+          "HQ",
+          "HK"
+        ],
+        "public_card": null,
+        "chips": [
+          1,
+          2
+        ],
+        "current_player": 0,
+        "current_round": 0,
+        "legal_actions": [
+          "call",
+          "raise",
+          "fold"
+        ]
+      },
+      "steps": [
+        {
+          "step": 0,
+          "player_id": 0,
+          "action": 1,
+          "action_name": "raise",
+          "state_before": {
+            "hand": "HQ",
+            "public_card": null,
+            "my_chips": 1,
+            "all_chips": [
+              1,
+              2
+            ],
+            "current_player": 0,
+            "legal_actions": [
+              "call",
+              "raise",
+              "fold"
+            ]
+          },
+          "state_after": {
+            "hand": "HK",
+            "public_card": null,
+            "my_chips": 2,
+            "all_chips": [
+              4,
+              2
+            ],
+            "current_player": 1,
+            "legal_actions": [
+              "call",
+              "raise",
+              "fold"
+            ]
+          },
+          "legal_actions": [
+            "call",
+            "raise",
+            "fold"
+          ],
+          "perfect_info": {
+            "hand_cards": [
+              "HQ",
+              "HK"
+            ],
+            "public_card": null,
+            "chips": [
+              4,
+              2
+            ],
+            "current_player": 1,
+            "current_round": 0,
+            "legal_actions": [
+              "call",
+              "raise",
+              "fold"
+            ]
+          },
+          "info": {}
+        },
+        {
+          "step": 1,
+          "player_id": 1,
+          "action": 0,
+          "action_name": "call",
+          "state_before": {
+            "hand": "HK",
+            "public_card": null,
+            "my_chips": 2,
+            "all_chips": [
+              4,
+              2
+            ],
+            "current_player": 1,
+            "legal_actions": [
+              "call",
+              "raise",
+              "fold"
+            ]
+          },
+          "state_after": {
+            "hand": "HQ",
+            "public_card": "HJ",
+            "my_chips": 4,
+            "all_chips": [
+              4,
+              4
+            ],
+            "current_player": 0,
+            "legal_actions": [
+              "raise",
+              "fold",
+              "check"
+            ]
+          },
+          "legal_actions": [
+            "call",
+            "raise",
+            "fold"
+          ],
+          "perfect_info": {
+            "hand_cards": [
+              "HQ",
+              "HK"
+            ],
+            "public_card": "HJ",
+            "chips": [
+              4,
+              4
+            ],
+            "current_player": 0,
+            "current_round": 1,
+            "legal_actions": [
+              "raise",
+              "fold",
+              "check"
+            ]
+          },
+          "info": {}
+        },
+        {
+          "step": 2,
+          "player_id": 0,
+          "action": 2,
+          "action_name": "fold",
+          "state_before": {
+            "hand": "HQ",
+            "public_card": "HJ",
+            "my_chips": 4,
+            "all_chips": [
+              4,
+              4
+            ],
+            "current_player": 0,
+            "legal_actions": [
+              "raise",
+              "fold",
+              "check"
+            ]
+          },
+          "state_after": {},
+          "legal_actions": [
+            "raise",
+            "fold",
+            "check"
+          ],
+          "perfect_info": {
+            "hand_cards": [
+              "HQ",
+              "HK"
+            ],
+            "public_card": "HJ",
+            "chips": [
+              4,
+              4
+            ],
+            "current_player": 1,
+            "current_round": 1,
+            "legal_actions": [
+              "raise",
+              "fold",
+              "check"
+            ]
+          },
+          "info": {}
+        }
+      ],
+      "payoffs": [
+        -2.0,
+        2.0
+      ],
+      "num_steps": 3,
+      "outcomes": [
+        "loss",
+        "win"
+      ],
+      "winner": 1,
+      "final_perfect_info": {
+        "hand_cards": [
+          "HQ",
+          "HK"
+        ],
+        "public_card": "HJ",
+        "chips": [
+          4,
+          4
+        ],
+        "current_player": 1,
+        "current_round": 1,
+        "legal_actions": [
+          "raise",
+          "fold",
+          "check"
+        ]
+      }
+    },
+    {
+      "seed": 4,
+      "num_players": 2,
+      "initial_state": {
+        "hand": "SJ",
+        "public_card": null,
+        "my_chips": 1,
+        "all_chips": [
+          2,
+          1
+        ],
+        "current_player": 1,
+        "legal_actions": [
+          "call",
+          "raise",
+          "fold"
+        ]
+      },
+      "initial_perfect_info": {
+        "hand_cards": [
+          "HK",
+          "SJ"
+        ],
+        "public_card": null,
+        "chips": [
+          2,
+          1
+        ],
+        "current_player": 1,
+        "current_round": 0,
+        "legal_actions": [
+          "call",
+          "raise",
+          "fold"
+        ]
+      },
+      "steps": [
+        {
+          "step": 0,
+          "player_id": 1,
+          "action": 1,
+          "action_name": "raise",
+          "state_before": {
+            "hand": "SJ",
+            "public_card": null,
+            "my_chips": 1,
+            "all_chips": [
+              2,
+              1
+            ],
+            "current_player": 1,
+            "legal_actions": [
+              "call",
+              "raise",
+              "fold"
+            ]
+          },
+          "state_after": {
+            "hand": "HK",
+            "public_card": null,
+            "my_chips": 2,
+            "all_chips": [
+              2,
+              4
+            ],
+            "current_player": 0,
+            "legal_actions": [
+              "call",
+              "raise",
+              "fold"
+            ]
+          },
+          "legal_actions": [
+            "call",
+            "raise",
+            "fold"
+          ],
+          "perfect_info": {
+            "hand_cards": [
+              "HK",
+              "SJ"
+            ],
+            "public_card": null,
+            "chips": [
+              2,
+              4
+            ],
+            "current_player": 0,
+            "current_round": 0,
+            "legal_actions": [
+              "call",
+              "raise",
+              "fold"
+            ]
+          },
+          "info": {}
+        },
+        {
+          "step": 1,
+          "player_id": 0,
+          "action": 0,
+          "action_name": "call",
+          "state_before": {
+            "hand": "HK",
+            "public_card": null,
+            "my_chips": 2,
+            "all_chips": [
+              2,
+              4
+            ],
+            "current_player": 0,
+            "legal_actions": [
+              "call",
+              "raise",
+              "fold"
+            ]
+          },
+          "state_after": {
+            "hand": "SJ",
+            "public_card": "SQ",
+            "my_chips": 4,
+            "all_chips": [
+              4,
+              4
+            ],
+            "current_player": 1,
+            "legal_actions": [
+              "raise",
+              "fold",
+              "check"
+            ]
+          },
+          "legal_actions": [
+            "call",
+            "raise",
+            "fold"
+          ],
+          "perfect_info": {
+            "hand_cards": [
+              "HK",
+              "SJ"
+            ],
+            "public_card": "SQ",
+            "chips": [
+              4,
+              4
+            ],
+            "current_player": 1,
+            "current_round": 1,
+            "legal_actions": [
+              "raise",
+              "fold",
+              "check"
+            ]
+          },
+          "info": {}
+        },
+        {
+          "step": 2,
+          "player_id": 1,
+          "action": 2,
+          "action_name": "fold",
+          "state_before": {
+            "hand": "SJ",
+            "public_card": "SQ",
+            "my_chips": 4,
+            "all_chips": [
+              4,
+              4
+            ],
+            "current_player": 1,
+            "legal_actions": [
+              "raise",
+              "fold",
+              "check"
+            ]
+          },
+          "state_after": {},
+          "legal_actions": [
+            "raise",
+            "fold",
+            "check"
+          ],
+          "perfect_info": {
+            "hand_cards": [
+              "HK",
+              "SJ"
+            ],
+            "public_card": "SQ",
+            "chips": [
+              4,
+              4
+            ],
+            "current_player": 0,
+            "current_round": 1,
+            "legal_actions": [
+              "raise",
+              "fold",
+              "check"
+            ]
+          },
+          "info": {}
+        }
+      ],
+      "payoffs": [
+        2.0,
+        -2.0
+      ],
+      "num_steps": 3,
+      "outcomes": [
+        "win",
+        "loss"
+      ],
+      "winner": 0,
+      "final_perfect_info": {
+        "hand_cards": [
+          "HK",
+          "SJ"
+        ],
+        "public_card": "SQ",
+        "chips": [
+          4,
+          4
+        ],
+        "current_player": 0,
+        "current_round": 1,
+        "legal_actions": [
+          "raise",
+          "fold",
+          "check"
+        ]
+      }
+    }
+  ]
+}
