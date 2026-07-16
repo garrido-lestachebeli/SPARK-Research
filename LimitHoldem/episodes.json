@@ -1,7 +1,7 @@
 {
   "version": 1,
   "game": "limit-holdem",
-  "episode_count": 1,
+  "episode_count": 5,
   "episodes": [
     {
       "seed": null,
@@ -455,6 +455,1173 @@
         ],
         "dealer_button": null,
         "current_player": 1,
+        "legal_actions": [
+          "raise",
+          "fold",
+          "check"
+        ],
+        "round_counter": null
+      }
+    },
+    {
+      "seed": null,
+      "num_players": 2,
+      "initial_state": {
+        "hand": [
+          "C6",
+          "S6"
+        ],
+        "public_cards": [],
+        "all_chips": [
+          1,
+          2
+        ],
+        "my_chips": 1,
+        "pot": null,
+        "stage": null,
+        "current_player": null,
+        "legal_actions": [
+          "call",
+          "raise",
+          "fold"
+        ]
+      },
+      "initial_perfect_info": {
+        "hand_cards": [
+          [
+            "C6",
+            "S6"
+          ],
+          [
+            "H8",
+            "S3"
+          ]
+        ],
+        "public_cards": [],
+        "chips": [
+          1,
+          2
+        ],
+        "dealer_button": null,
+        "current_player": 0,
+        "legal_actions": [
+          "call",
+          "raise",
+          "fold"
+        ],
+        "round_counter": null
+      },
+      "steps": [
+        {
+          "step": 0,
+          "player_id": 0,
+          "action": 2,
+          "action_name": "fold",
+          "state_before": {
+            "hand": [
+              "C6",
+              "S6"
+            ],
+            "public_cards": [],
+            "all_chips": [
+              1,
+              2
+            ],
+            "my_chips": 1,
+            "pot": null,
+            "stage": null,
+            "current_player": null,
+            "legal_actions": [
+              "call",
+              "raise",
+              "fold"
+            ]
+          },
+          "state_after": {},
+          "legal_actions": [
+            "call",
+            "raise",
+            "fold"
+          ],
+          "perfect_info": {
+            "hand_cards": [
+              [
+                "C6",
+                "S6"
+              ],
+              [
+                "H8",
+                "S3"
+              ]
+            ],
+            "public_cards": [],
+            "chips": [
+              1,
+              2
+            ],
+            "dealer_button": null,
+            "current_player": 1,
+            "legal_actions": [
+              "raise",
+              "fold",
+              "check"
+            ],
+            "round_counter": null
+          },
+          "info": {}
+        }
+      ],
+      "payoffs": [
+        -0.5,
+        0.5
+      ],
+      "num_steps": 1,
+      "outcomes": [
+        "loss",
+        "win"
+      ],
+      "winner": 1,
+      "final_perfect_info": {
+        "hand_cards": [
+          [
+            "C6",
+            "S6"
+          ],
+          [
+            "H8",
+            "S3"
+          ]
+        ],
+        "public_cards": [],
+        "chips": [
+          1,
+          2
+        ],
+        "dealer_button": null,
+        "current_player": 1,
+        "legal_actions": [
+          "raise",
+          "fold",
+          "check"
+        ],
+        "round_counter": null
+      }
+    },
+    {
+      "seed": null,
+      "num_players": 2,
+      "initial_state": {
+        "hand": [
+          "H5",
+          "D3"
+        ],
+        "public_cards": [],
+        "all_chips": [
+          2,
+          1
+        ],
+        "my_chips": 1,
+        "pot": null,
+        "stage": null,
+        "current_player": null,
+        "legal_actions": [
+          "call",
+          "raise",
+          "fold"
+        ]
+      },
+      "initial_perfect_info": {
+        "hand_cards": [
+          [
+            "S7",
+            "H3"
+          ],
+          [
+            "H5",
+            "D3"
+          ]
+        ],
+        "public_cards": [],
+        "chips": [
+          2,
+          1
+        ],
+        "dealer_button": null,
+        "current_player": 1,
+        "legal_actions": [
+          "call",
+          "raise",
+          "fold"
+        ],
+        "round_counter": null
+      },
+      "steps": [
+        {
+          "step": 0,
+          "player_id": 1,
+          "action": 2,
+          "action_name": "fold",
+          "state_before": {
+            "hand": [
+              "H5",
+              "D3"
+            ],
+            "public_cards": [],
+            "all_chips": [
+              2,
+              1
+            ],
+            "my_chips": 1,
+            "pot": null,
+            "stage": null,
+            "current_player": null,
+            "legal_actions": [
+              "call",
+              "raise",
+              "fold"
+            ]
+          },
+          "state_after": {},
+          "legal_actions": [
+            "call",
+            "raise",
+            "fold"
+          ],
+          "perfect_info": {
+            "hand_cards": [
+              [
+                "S7",
+                "H3"
+              ],
+              [
+                "H5",
+                "D3"
+              ]
+            ],
+            "public_cards": [],
+            "chips": [
+              2,
+              1
+            ],
+            "dealer_button": null,
+            "current_player": 0,
+            "legal_actions": [
+              "raise",
+              "fold",
+              "check"
+            ],
+            "round_counter": null
+          },
+          "info": {}
+        }
+      ],
+      "payoffs": [
+        0.5,
+        -0.5
+      ],
+      "num_steps": 1,
+      "outcomes": [
+        "win",
+        "loss"
+      ],
+      "winner": 0,
+      "final_perfect_info": {
+        "hand_cards": [
+          [
+            "S7",
+            "H3"
+          ],
+          [
+            "H5",
+            "D3"
+          ]
+        ],
+        "public_cards": [],
+        "chips": [
+          2,
+          1
+        ],
+        "dealer_button": null,
+        "current_player": 0,
+        "legal_actions": [
+          "raise",
+          "fold",
+          "check"
+        ],
+        "round_counter": null
+      }
+    },
+    {
+      "seed": null,
+      "num_players": 2,
+      "initial_state": {
+        "hand": [
+          "D2",
+          "S8"
+        ],
+        "public_cards": [],
+        "all_chips": [
+          1,
+          2
+        ],
+        "my_chips": 1,
+        "pot": null,
+        "stage": null,
+        "current_player": null,
+        "legal_actions": [
+          "call",
+          "raise",
+          "fold"
+        ]
+      },
+      "initial_perfect_info": {
+        "hand_cards": [
+          [
+            "D2",
+            "S8"
+          ],
+          [
+            "SA",
+            "S5"
+          ]
+        ],
+        "public_cards": [],
+        "chips": [
+          1,
+          2
+        ],
+        "dealer_button": null,
+        "current_player": 0,
+        "legal_actions": [
+          "call",
+          "raise",
+          "fold"
+        ],
+        "round_counter": null
+      },
+      "steps": [
+        {
+          "step": 0,
+          "player_id": 0,
+          "action": 1,
+          "action_name": "raise",
+          "state_before": {
+            "hand": [
+              "D2",
+              "S8"
+            ],
+            "public_cards": [],
+            "all_chips": [
+              1,
+              2
+            ],
+            "my_chips": 1,
+            "pot": null,
+            "stage": null,
+            "current_player": null,
+            "legal_actions": [
+              "call",
+              "raise",
+              "fold"
+            ]
+          },
+          "state_after": {
+            "hand": [
+              "SA",
+              "S5"
+            ],
+            "public_cards": [],
+            "all_chips": [
+              4,
+              2
+            ],
+            "my_chips": 2,
+            "pot": null,
+            "stage": null,
+            "current_player": null,
+            "legal_actions": [
+              "call",
+              "raise",
+              "fold"
+            ]
+          },
+          "legal_actions": [
+            "call",
+            "raise",
+            "fold"
+          ],
+          "perfect_info": {
+            "hand_cards": [
+              [
+                "D2",
+                "S8"
+              ],
+              [
+                "SA",
+                "S5"
+              ]
+            ],
+            "public_cards": [],
+            "chips": [
+              4,
+              2
+            ],
+            "dealer_button": null,
+            "current_player": 1,
+            "legal_actions": [
+              "call",
+              "raise",
+              "fold"
+            ],
+            "round_counter": null
+          },
+          "info": {}
+        },
+        {
+          "step": 1,
+          "player_id": 1,
+          "action": 0,
+          "action_name": "call",
+          "state_before": {
+            "hand": [
+              "SA",
+              "S5"
+            ],
+            "public_cards": [],
+            "all_chips": [
+              4,
+              2
+            ],
+            "my_chips": 2,
+            "pot": null,
+            "stage": null,
+            "current_player": null,
+            "legal_actions": [
+              "call",
+              "raise",
+              "fold"
+            ]
+          },
+          "state_after": {
+            "hand": [
+              "D2",
+              "S8"
+            ],
+            "public_cards": [
+              "HK",
+              "ST",
+              "H5"
+            ],
+            "all_chips": [
+              4,
+              4
+            ],
+            "my_chips": 4,
+            "pot": null,
+            "stage": null,
+            "current_player": null,
+            "legal_actions": [
+              "raise",
+              "fold",
+              "check"
+            ]
+          },
+          "legal_actions": [
+            "call",
+            "raise",
+            "fold"
+          ],
+          "perfect_info": {
+            "hand_cards": [
+              [
+                "D2",
+                "S8"
+              ],
+              [
+                "SA",
+                "S5"
+              ]
+            ],
+            "public_cards": [
+              "HK",
+              "ST",
+              "H5"
+            ],
+            "chips": [
+              4,
+              4
+            ],
+            "dealer_button": null,
+            "current_player": 0,
+            "legal_actions": [
+              "raise",
+              "fold",
+              "check"
+            ],
+            "round_counter": null
+          },
+          "info": {}
+        },
+        {
+          "step": 2,
+          "player_id": 0,
+          "action": 2,
+          "action_name": "fold",
+          "state_before": {
+            "hand": [
+              "D2",
+              "S8"
+            ],
+            "public_cards": [
+              "HK",
+              "ST",
+              "H5"
+            ],
+            "all_chips": [
+              4,
+              4
+            ],
+            "my_chips": 4,
+            "pot": null,
+            "stage": null,
+            "current_player": null,
+            "legal_actions": [
+              "raise",
+              "fold",
+              "check"
+            ]
+          },
+          "state_after": {},
+          "legal_actions": [
+            "raise",
+            "fold",
+            "check"
+          ],
+          "perfect_info": {
+            "hand_cards": [
+              [
+                "D2",
+                "S8"
+              ],
+              [
+                "SA",
+                "S5"
+              ]
+            ],
+            "public_cards": [
+              "HK",
+              "ST",
+              "H5"
+            ],
+            "chips": [
+              4,
+              4
+            ],
+            "dealer_button": null,
+            "current_player": 1,
+            "legal_actions": [
+              "raise",
+              "fold",
+              "check"
+            ],
+            "round_counter": null
+          },
+          "info": {}
+        }
+      ],
+      "payoffs": [
+        -2.0,
+        2.0
+      ],
+      "num_steps": 3,
+      "outcomes": [
+        "loss",
+        "win"
+      ],
+      "winner": 1,
+      "final_perfect_info": {
+        "hand_cards": [
+          [
+            "D2",
+            "S8"
+          ],
+          [
+            "SA",
+            "S5"
+          ]
+        ],
+        "public_cards": [
+          "HK",
+          "ST",
+          "H5"
+        ],
+        "chips": [
+          4,
+          4
+        ],
+        "dealer_button": null,
+        "current_player": 1,
+        "legal_actions": [
+          "raise",
+          "fold",
+          "check"
+        ],
+        "round_counter": null
+      }
+    },
+    {
+      "seed": null,
+      "num_players": 2,
+      "initial_state": {
+        "hand": [
+          "HT",
+          "SQ"
+        ],
+        "public_cards": [],
+        "all_chips": [
+          1,
+          2
+        ],
+        "my_chips": 1,
+        "pot": null,
+        "stage": null,
+        "current_player": null,
+        "legal_actions": [
+          "call",
+          "raise",
+          "fold"
+        ]
+      },
+      "initial_perfect_info": {
+        "hand_cards": [
+          [
+            "HT",
+            "SQ"
+          ],
+          [
+            "HK",
+            "H5"
+          ]
+        ],
+        "public_cards": [],
+        "chips": [
+          1,
+          2
+        ],
+        "dealer_button": null,
+        "current_player": 0,
+        "legal_actions": [
+          "call",
+          "raise",
+          "fold"
+        ],
+        "round_counter": null
+      },
+      "steps": [
+        {
+          "step": 0,
+          "player_id": 0,
+          "action": 0,
+          "action_name": "call",
+          "state_before": {
+            "hand": [
+              "HT",
+              "SQ"
+            ],
+            "public_cards": [],
+            "all_chips": [
+              1,
+              2
+            ],
+            "my_chips": 1,
+            "pot": null,
+            "stage": null,
+            "current_player": null,
+            "legal_actions": [
+              "call",
+              "raise",
+              "fold"
+            ]
+          },
+          "state_after": {
+            "hand": [
+              "HK",
+              "H5"
+            ],
+            "public_cards": [],
+            "all_chips": [
+              2,
+              2
+            ],
+            "my_chips": 2,
+            "pot": null,
+            "stage": null,
+            "current_player": null,
+            "legal_actions": [
+              "raise",
+              "fold",
+              "check"
+            ]
+          },
+          "legal_actions": [
+            "call",
+            "raise",
+            "fold"
+          ],
+          "perfect_info": {
+            "hand_cards": [
+              [
+                "HT",
+                "SQ"
+              ],
+              [
+                "HK",
+                "H5"
+              ]
+            ],
+            "public_cards": [],
+            "chips": [
+              2,
+              2
+            ],
+            "dealer_button": null,
+            "current_player": 1,
+            "legal_actions": [
+              "raise",
+              "fold",
+              "check"
+            ],
+            "round_counter": null
+          },
+          "info": {}
+        },
+        {
+          "step": 1,
+          "player_id": 1,
+          "action": 1,
+          "action_name": "raise",
+          "state_before": {
+            "hand": [
+              "HK",
+              "H5"
+            ],
+            "public_cards": [],
+            "all_chips": [
+              2,
+              2
+            ],
+            "my_chips": 2,
+            "pot": null,
+            "stage": null,
+            "current_player": null,
+            "legal_actions": [
+              "raise",
+              "fold",
+              "check"
+            ]
+          },
+          "state_after": {
+            "hand": [
+              "HT",
+              "SQ"
+            ],
+            "public_cards": [],
+            "all_chips": [
+              2,
+              4
+            ],
+            "my_chips": 2,
+            "pot": null,
+            "stage": null,
+            "current_player": null,
+            "legal_actions": [
+              "call",
+              "raise",
+              "fold"
+            ]
+          },
+          "legal_actions": [
+            "raise",
+            "fold",
+            "check"
+          ],
+          "perfect_info": {
+            "hand_cards": [
+              [
+                "HT",
+                "SQ"
+              ],
+              [
+                "HK",
+                "H5"
+              ]
+            ],
+            "public_cards": [],
+            "chips": [
+              2,
+              4
+            ],
+            "dealer_button": null,
+            "current_player": 0,
+            "legal_actions": [
+              "call",
+              "raise",
+              "fold"
+            ],
+            "round_counter": null
+          },
+          "info": {}
+        },
+        {
+          "step": 2,
+          "player_id": 0,
+          "action": 1,
+          "action_name": "raise",
+          "state_before": {
+            "hand": [
+              "HT",
+              "SQ"
+            ],
+            "public_cards": [],
+            "all_chips": [
+              2,
+              4
+            ],
+            "my_chips": 2,
+            "pot": null,
+            "stage": null,
+            "current_player": null,
+            "legal_actions": [
+              "call",
+              "raise",
+              "fold"
+            ]
+          },
+          "state_after": {
+            "hand": [
+              "HK",
+              "H5"
+            ],
+            "public_cards": [],
+            "all_chips": [
+              6,
+              4
+            ],
+            "my_chips": 4,
+            "pot": null,
+            "stage": null,
+            "current_player": null,
+            "legal_actions": [
+              "call",
+              "raise",
+              "fold"
+            ]
+          },
+          "legal_actions": [
+            "call",
+            "raise",
+            "fold"
+          ],
+          "perfect_info": {
+            "hand_cards": [
+              [
+                "HT",
+                "SQ"
+              ],
+              [
+                "HK",
+                "H5"
+              ]
+            ],
+            "public_cards": [],
+            "chips": [
+              6,
+              4
+            ],
+            "dealer_button": null,
+            "current_player": 1,
+            "legal_actions": [
+              "call",
+              "raise",
+              "fold"
+            ],
+            "round_counter": null
+          },
+          "info": {}
+        },
+        {
+          "step": 3,
+          "player_id": 1,
+          "action": 0,
+          "action_name": "call",
+          "state_before": {
+            "hand": [
+              "HK",
+              "H5"
+            ],
+            "public_cards": [],
+            "all_chips": [
+              6,
+              4
+            ],
+            "my_chips": 4,
+            "pot": null,
+            "stage": null,
+            "current_player": null,
+            "legal_actions": [
+              "call",
+              "raise",
+              "fold"
+            ]
+          },
+          "state_after": {
+            "hand": [
+              "HT",
+              "SQ"
+            ],
+            "public_cards": [
+              "H7",
+              "DJ",
+              "HQ"
+            ],
+            "all_chips": [
+              6,
+              6
+            ],
+            "my_chips": 6,
+            "pot": null,
+            "stage": null,
+            "current_player": null,
+            "legal_actions": [
+              "raise",
+              "fold",
+              "check"
+            ]
+          },
+          "legal_actions": [
+            "call",
+            "raise",
+            "fold"
+          ],
+          "perfect_info": {
+            "hand_cards": [
+              [
+                "HT",
+                "SQ"
+              ],
+              [
+                "HK",
+                "H5"
+              ]
+            ],
+            "public_cards": [
+              "H7",
+              "DJ",
+              "HQ"
+            ],
+            "chips": [
+              6,
+              6
+            ],
+            "dealer_button": null,
+            "current_player": 0,
+            "legal_actions": [
+              "raise",
+              "fold",
+              "check"
+            ],
+            "round_counter": null
+          },
+          "info": {}
+        },
+        {
+          "step": 4,
+          "player_id": 0,
+          "action": 3,
+          "action_name": "check",
+          "state_before": {
+            "hand": [
+              "HT",
+              "SQ"
+            ],
+            "public_cards": [
+              "H7",
+              "DJ",
+              "HQ"
+            ],
+            "all_chips": [
+              6,
+              6
+            ],
+            "my_chips": 6,
+            "pot": null,
+            "stage": null,
+            "current_player": null,
+            "legal_actions": [
+              "raise",
+              "fold",
+              "check"
+            ]
+          },
+          "state_after": {
+            "hand": [
+              "HK",
+              "H5"
+            ],
+            "public_cards": [
+              "H7",
+              "DJ",
+              "HQ"
+            ],
+            "all_chips": [
+              6,
+              6
+            ],
+            "my_chips": 6,
+            "pot": null,
+            "stage": null,
+            "current_player": null,
+            "legal_actions": [
+              "raise",
+              "fold",
+              "check"
+            ]
+          },
+          "legal_actions": [
+            "raise",
+            "fold",
+            "check"
+          ],
+          "perfect_info": {
+            "hand_cards": [
+              [
+                "HT",
+                "SQ"
+              ],
+              [
+                "HK",
+                "H5"
+              ]
+            ],
+            "public_cards": [
+              "H7",
+              "DJ",
+              "HQ"
+            ],
+            "chips": [
+              6,
+              6
+            ],
+            "dealer_button": null,
+            "current_player": 1,
+            "legal_actions": [
+              "raise",
+              "fold",
+              "check"
+            ],
+            "round_counter": null
+          },
+          "info": {}
+        },
+        {
+          "step": 5,
+          "player_id": 1,
+          "action": 2,
+          "action_name": "fold",
+          "state_before": {
+            "hand": [
+              "HK",
+              "H5"
+            ],
+            "public_cards": [
+              "H7",
+              "DJ",
+              "HQ"
+            ],
+            "all_chips": [
+              6,
+              6
+            ],
+            "my_chips": 6,
+            "pot": null,
+            "stage": null,
+            "current_player": null,
+            "legal_actions": [
+              "raise",
+              "fold",
+              "check"
+            ]
+          },
+          "state_after": {},
+          "legal_actions": [
+            "raise",
+            "fold",
+            "check"
+          ],
+          "perfect_info": {
+            "hand_cards": [
+              [
+                "HT",
+                "SQ"
+              ],
+              [
+                "HK",
+                "H5"
+              ]
+            ],
+            "public_cards": [
+              "H7",
+              "DJ",
+              "HQ"
+            ],
+            "chips": [
+              6,
+              6
+            ],
+            "dealer_button": null,
+            "current_player": 0,
+            "legal_actions": [
+              "raise",
+              "fold",
+              "check"
+            ],
+            "round_counter": null
+          },
+          "info": {}
+        }
+      ],
+      "payoffs": [
+        3.0,
+        -3.0
+      ],
+      "num_steps": 6,
+      "outcomes": [
+        "win",
+        "loss"
+      ],
+      "winner": 0,
+      "final_perfect_info": {
+        "hand_cards": [
+          [
+            "HT",
+            "SQ"
+          ],
+          [
+            "HK",
+            "H5"
+          ]
+        ],
+        "public_cards": [
+          "H7",
+          "DJ",
+          "HQ"
+        ],
+        "chips": [
+          6,
+          6
+        ],
+        "dealer_button": null,
+        "current_player": 0,
         "legal_actions": [
           "raise",
           "fold",
