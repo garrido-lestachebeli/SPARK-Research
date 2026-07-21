@@ -216,3 +216,16 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# SPARK generated training data
+runs/
+.tmp-runs/
+pytest-cache-files-*/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+checkpoint.json
+worker.log
+slurm-*.out
+slurm-*.err
+**/episodes.json

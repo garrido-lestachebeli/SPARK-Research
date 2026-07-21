@@ -54,24 +54,6 @@ def format_state(state: dict[str, Any] | None) -> dict[str, Any]:
         "legal_actions": list(legal_actions),
     }
 
-
-
-#def format_perfect_info(env) -> dict[str, Any]:
-    try:
-        info = env.get_perfect_information()
-    except Exception:
-        return {}
-
-    return {
-        "hand_cards": _jsonify(info.get("hand_cards")),
-        "public_cards": _jsonify(info.get("public_cards")),
-        "chips": _jsonify(info.get("chips")),
-        "dealer_button": _jsonify(info.get("dealer_button")),
-        "current_player": _jsonify(info.get("current_player")),
-        "legal_actions": _jsonify(info.get("legal_actions")),
-        "round_counter": _jsonify(info.get("round_counter")),
-    }
-
 def format_perfect_info(env) -> dict[str, Any]:
     try:
         info = env.get_perfect_information()
@@ -244,10 +226,6 @@ def run_episode(
         action_name = ACTION_NAMES.get(action, f"unknown({action})")
 
         next_state, next_player_id = env.step(action)
-
-        print("game.public_cards:", env.game.public_cards)
-        print("perfect info:", env.get_perfect_information()) #added two lines
-
         state_after = format_state(None if env.is_over() else next_state)
 
         report.steps.append(

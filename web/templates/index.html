@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SPARK Training Console</title>
+  <!-- Relative paths so Open OnDemand /rnode and /node proxies work. -->
+  <link rel="stylesheet" href="static/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <p class="eyebrow">MSOE ROSIE</p>
+      <h1>SPARK Training Console</h1>
+    </div>
+    <div id="connection" class="status-pill">Connecting</div>
+  </header>
+
+  <nav class="tabs" aria-label="Dashboard views">
+    <button data-tab="overview" class="active">Overview</button>
+    <button data-tab="campaigns">Campaigns</button>
+    <button data-tab="replay">Episode Replay</button>
+  </nav>
+
+  <main>
+    <section id="overview" class="tab-panel active">
+      <div class="section-heading">
+        <div>
+          <p class="eyebrow">Research telemetry</p>
+          <h2>Training overview</h2>
+        </div>
+        <div class="run-picker">
+          <select id="run-select" aria-label="Select run"></select>
+          <span id="run-environment" class="run-environment"></span>
+        </div>
+      </div>
+
+      <section class="overview-section">
+        <div id="stat-cards" class="snapshot-grid"></div>
+      </section>
+
+      <section class="overview-section">
+        <article class="panel trend-panel">
+          <div class="panel-title">
+            <div>
+              <p class="eyebrow">Trend</p>
+              <h3>Seat 0 payoff over training</h3>
+            </div>
+            <span id="trend-window">Last 100 episodes</span>
+          </div>
+          <div class="chart-legend" aria-label="Chart legend">
+            <span><i class="legend-line rolling"></i>Rolling mean</span>
+            <span><i class="legend-line cumulative"></i>Cumulative mean</span>
+          </div>
+          <canvas id="payoff-chart" width="900" height="300"></canvas>
+        </article>
+      </section>
+
+      <section class="overview-section">
+        <div class="overview-heading">
+          <div>
+            <p class="eyebrow">Gameplay behavior</p>
+            <h3>Results by seat</h3>
+          </div>
+        </div>
+        <div class="breakdown-grid">
+          <article class="panel">
+            <div class="panel-title"><h3>Payoffs</h3><span>Overall and recent</span></div>
+            <div id="payoff-summary" class="metric-table"></div>
+          </article>
+          <article class="panel">
+            <div class="panel-title"><h3>Outcomes</h3><span>Wilson 95% CI</span></div>
+            <div id="outcome-grid"></div>
+          </article>
+        </div>
+      </section>
+
+      <details class="panel advanced-panel">
+        <summary>
+          <span>
+            <span class="eyebrow">Advanced diagnostics</span>
+            Variability, episode shape, and action mix
+          </span>
+          <span class="help">Expand details</span>
+        </summary>
+        <p class="help definitions">
+          CI estimates uncertainty around a mean or rate. Standard deviation
+          describes episode-to-episode spread; standard error describes uncertainty
+          in the estimated mean; IQR is the middle 50% of observations.
+        </p>
+        <div class="breakdown-grid advanced-grid">
+          <article>
+            <div class="panel-title"><h3>Episode diagnostics</h3><span>Length and duration</span></div>
+            <div id="episode-diagnostics" class="metric-table"></div>
+          </article>
+          <article>
+            <div class="panel-title"><h3>Action distribution</h3><span>By seat</span></div>
+            <div id="action-bars" class="bars"></div>
+          </article>
+        </div>
+      </details>
+    </section>
+
+    <section id="campaigns" class="tab-panel">
+      <div class="split">
+        <form id="campaign-form" class="panel form-panel">
+          <p class="eyebrow">Slurm submission</p>
+          <h2>New continuous campaign</h2>
+          <label>Campaign name<input name="name" placeholder="opponent-modeling-run"></label>
+          <fieldset>
+            <legend>Environments</legend>
+            <div id="environment-options" class="check-grid"></div>
+          </fieldset>
+          <div id="starting-agent-options" class="starting-agent-options"></div>
+          <div class="two-columns">
+            <label>Base seed<input name="seed" type="number" value="42"></label>
+            <label>Episode limit<input name="episodes" type="number" min="1" placeholder="Blank = continuous"></label>
+            <label>Checkpoint interval<input name="checkpoint_interval" type="number" min="1" value="100"></label>
+            <label>Agent memory<input name="agent_memory_size" type="number" min="0" value="100"></label>
+            <label>CPU cores<input name="cpus" type="number" min="1" value="1"></label>
+            <label>Memory<input name="memory" value="4G"></label>
+            <label>Wall time<input name="wall_time" value="04:00:00"></label>
+            <label>Partition<input name="partition" placeholder="Cluster default"></label>
+          </div>
+          <p class="help">One resumable Slurm job is submitted per selected environment. Empty episode limit means it requeues until stopped.</p>
+          <button type="submit" class="primary">Submit campaign</button>
+          <p id="campaign-message" class="message"></p>
+        </form>
+
+        <div>
+          <div class="section-heading"><h2>Campaign jobs</h2><button id="refresh-jobs">Refresh</button></div>
+          <div id="campaign-list" class="stack"></div>
+        </div>
+      </div>
+
+      <article class="panel agent-library-panel">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Reusable checkpoints</p>
+            <h2>Agent library</h2>
+          </div>
+        </div>
+        <p class="help">
+          Save the latest durable checkpoint from a run, then use that agent as
+          the starting point for a compatible environment in a new campaign.
+        </p>
+        <form id="save-agent-form" class="agent-save-form">
+          <label>
+            Snapshot name
+            <input name="name" maxlength="100" required placeholder="leduc-baseline-v1">
+          </label>
+          <label>
+            Source run
+            <select id="agent-source-run" name="run_id" required></select>
+          </label>
+          <button type="submit" class="primary">Save agent</button>
+        </form>
+        <p id="agent-library-message" class="message"></p>
+        <div id="agent-library-list" class="agent-library-list"></div>
+      </article>
+    </section>
+
+    <section id="replay" class="tab-panel">
+      <div class="section-heading">
+        <div><p class="eyebrow">Full information</p><h2>Episode replay</h2></div>
+        <div class="inline-controls">
+          <div class="run-picker">
+            <select id="replay-run-select"></select>
+            <span id="replay-run-environment" class="run-environment"></span>
+          </div>
+          <select id="episode-select"></select>
+        </div>
+      </div>
+      <div class="replay-layout">
+        <article class="panel poker-table">
+          <div class="player-card">
+            <span>Player 1 hidden hand</span>
+            <strong id="player-one-hand">—</strong>
+          </div>
+          <div class="board">
+            <span>Public cards</span>
+            <strong id="public-cards">—</strong>
+            <small id="pot-state"></small>
+          </div>
+          <div class="player-card">
+            <span>Player 0 hidden hand</span>
+            <strong id="player-zero-hand">—</strong>
+          </div>
+          <div id="action-banner" class="action-banner">Select an episode</div>
+        </article>
+        <article class="panel inspector">
+          <div class="timeline-controls">
+            <button id="step-first">|&lt;</button>
+            <button id="step-prev">&lt;</button>
+            <button id="step-play">Play</button>
+            <button id="step-next">&gt;</button>
+            <button id="step-last">&gt;|</button>
+            <span id="timeline-label">0 / 0</span>
+          </div>
+          <input id="timeline" type="range" min="0" max="0" value="0">
+          <h3>Visible observation (agent input)</h3>
+          <pre id="visible-json">{}</pre>
+          <h3>Hidden / perfect state (replay only)</h3>
+          <pre id="hidden-json">{}</pre>
+          <details><summary>Complete raw step</summary><pre id="raw-json">{}</pre></details>
+        </article>
+      </div>
+    </section>
+  </main>
+
+  <script src="static/app.js"></script>
+</body>
+</html>

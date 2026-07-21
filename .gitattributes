@@ -1,0 +1,4 @@
+# Keep shell/Slurm scripts Unix-compatible on ROSIE
+*.sh text eol=lf
+*.sbatch text eol=lf
+*.bash text eol=lf
