@@ -60,7 +60,29 @@ class LeducAgentQ(Agent):
 
         return best_action
 
-    def update(self, episode: Episode) -> dict[str, float]:
+        def select_action(
+                self,
+                observation,
+                legal_actions,
+                player_id,
+        ):
+            state = self.encode(observation)
+
+            if self._random.random() < self.epsilon:
+                return self._random.choice(legal_actions)
+
+            values = self.q[state]
+
+            legal_values = {
+                action: values[action]
+                for action in legal_actions
+            }
+
+            return max(
+                legal_values,
+                key=legal_values.get
+            )
+    #def update(self, episode: Episode) -> dict[str, float]:
         """Learn from a completed episode using tabular Q-learning."""
 
         steps = episode.steps

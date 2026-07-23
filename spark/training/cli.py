@@ -30,6 +30,16 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Instantiate one agent per poker seat instead of sharing one.",
     )
+
+    parser.add_argument(
+        "--agents",
+        nargs="+",
+        default=None,
+        help=(
+            "Agents by seat order. Example: "
+            "--agents leduc-random leduc-q"
+        ),
+    )
     parser.add_argument(
         "--agent-memory-size",
         type=int,
@@ -46,6 +56,7 @@ def main() -> None:
         TrainerConfig(
             run_id=run_id,
             environment=args.environment,
+            agents=args.agents,
             seed=args.seed,
             run_directory=args.run_directory,
             checkpoint_interval=max(1, args.checkpoint_interval),

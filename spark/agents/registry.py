@@ -12,25 +12,28 @@ from LeducPoker.q_agent import LeducAgentQ
 
 from .base import Agent
 
-_AGENTS: dict[str, Callable[..., Agent]] = {
-    "leduc-holdem": LeducAgentQ,
+_AGENTS = {
+    "leduc-random": LeducAgent,
+    "leduc-q": LeducAgentQ,
+
     "limit-holdem": LimitHoldemAgent,
     "no-limit-holdem": NoLimitHoldemAgent,
 }
 
 
 def create_agent(
-    environment_id: str,
+    agent_id: str,
     *,
     seed: int = 0,
-    config: dict[str, Any] | None = None,
-) -> Agent:
+    config=None,
+):
     try:
-        factory = _AGENTS[environment_id]
+        factory = _AGENTS[agent_id]
     except KeyError as error:
         raise KeyError(
-            f"No agent for {environment_id!r}; available: {sorted(_AGENTS)}"
+            f"No agent {agent_id!r}; available: {sorted(_AGENTS)}"
         ) from error
+
     return factory(config=config, seed=seed)
 
 

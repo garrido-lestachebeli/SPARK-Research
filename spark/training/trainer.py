@@ -26,11 +26,12 @@ from spark.storage import RunDatabase
 class TrainerConfig:
     run_id: str
     environment: str
+    agents: list[str] | None = None
     seed: int = 0
     run_directory: str = "runs"
     checkpoint_interval: int = 100
     episode_limit: int | None = None
-    shared_agents: bool = True
+    shared_agents: bool = False
     agent_memory_size: int = 100
 
 
@@ -58,20 +59,35 @@ class Trainer:
         self._install_signal_handlers()
 
     def _create_agents(self) -> dict[int, Agent]:
-        agent_config = {"memory_size": self.config.agent_memory_size}
-        if self.config.shared_agents:
-            agent = create_agent(
-                self.config.environment,
-                seed=self.config.seed,
-                config=agent_config,
-            )
-            return {seat: agent for seat in range(self.environment.num_players)}
+
+        agent_config = {
+            "memory_size": self.config.agent_memory_size
+        }
+
+        if self.config.agents:
+            if len(self.config.agents) != self.environment.num_players:
+                raise ValueError(
+                    "Number of agents must equal number of players"
+                )
+
+            return {
+                seat: create_agent(
+                    agent_name,
+                    seed=self.config.seed + seat,
+                    config=agent_config,
+                )
+                for seat, agent_name in enumerate(self.config.agents)
+            }
+
+        # fallback behavior
+        agent = create_agent(
+            self.config.environment,
+            seed=self.config.seed,
+            config=agent_config,
+        )
+
         return {
-            seat: create_agent(
-                self.config.environment,
-                seed=self.config.seed + seat,
-                config=agent_config,
-            )
+            seat: agent
             for seat in range(self.environment.num_players)
         }
 
