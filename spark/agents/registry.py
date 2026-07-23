@@ -8,11 +8,12 @@ from typing import Any
 from LeducPoker.agent import LeducAgent
 from LimitHoldem.agent import LimitHoldemAgent
 from NoLimitHoldem.agent import NoLimitHoldemAgent
+from LeducPoker.q_agent import LeducAgentQ
 
 from .base import Agent
 
 _AGENTS: dict[str, Callable[..., Agent]] = {
-    "leduc-holdem": LeducAgent,
+    "leduc-holdem": LeducAgentQ,
     "limit-holdem": LimitHoldemAgent,
     "no-limit-holdem": NoLimitHoldemAgent,
 }

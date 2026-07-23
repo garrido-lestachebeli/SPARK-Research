@@ -13,12 +13,13 @@ Registered in spark/agents/registry.py. Change `name` when this is no longer ran
 from __future__ import annotations
 
 from typing import Any
-
+from random import random
 from spark.agents.base import Agent
 from spark.models import Episode
 
-ACTION_NAMES = {0: "call", 1: "raise", 2: "fold", 3: "check"}
+from collections import defaultdict
 
+ACTION_NAMES = {0: "call", 1: "raise", 2: "fold", 3: "check"}
 
 class LeducAgent(Agent):
     name = "leduc-random"
