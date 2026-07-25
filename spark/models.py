@@ -97,6 +97,8 @@ class EnvironmentInfo:
     num_players: int
     action_names: dict[int, str]
     reason_disabled: str | None = None
+    min_players: int = 2
+    max_players: int = 2
 
 
 def outcomes_from_payoffs(payoffs: list[float]) -> list[str]:

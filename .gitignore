@@ -218,6 +218,7 @@ __marimo__/
 .streamlit/secrets.toml
 
 # SPARK generated training data
+data/
 runs/
 .tmp-runs/
 pytest-cache-files-*/

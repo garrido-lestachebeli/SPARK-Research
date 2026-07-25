@@ -13,17 +13,26 @@ from spark.models import Episode
 class Agent(ABC):
     """Serializable agent that receives only player-visible state."""
 
+    agent_id: str
     environment_id: str
     name = "random-agent"
     action_names: dict[int, str] = {}
+    default = False
+    supports_training = True
 
     def __init__(self, config: dict[str, Any] | None = None, *, seed: int = 0) -> None:
         self.config = dict(config or {})
         self.seed = int(self.config.get("seed", seed))
         self.memory_size = max(0, int(self.config.get("memory_size", 100)))
+        self.seat_id = int(self.config.get("seat_id", 0))
         self.episode_memory: list[dict[str, Any]] = []
         self.episodes_seen = 0
+        self.training = bool(self.config.get("training", True))
         self._random = random.Random(self.seed)
+
+    def set_training(self, enabled: bool) -> None:
+        """Switch between learning/exploration and frozen evaluation."""
+        self.training = bool(enabled)
 
     def pi(
         self,
@@ -61,13 +70,16 @@ class Agent(ABC):
 
     def state_dict(self) -> dict[str, Any]:
         return {
+            "agent_id": self.agent_id,
             "agent_name": self.name,
             "environment": self.environment_id,
             "config": self.config,
             "seed": self.seed,
             "memory_size": self.memory_size,
+            "seat_id": self.seat_id,
             "episode_memory": self.episode_memory,
             "episodes_seen": self.episodes_seen,
+            "training": self.training,
             "random_state": repr(self._random.getstate()),
         }
 
@@ -77,12 +89,19 @@ class Agent(ABC):
             raise ValueError(
                 f"Cannot load {environment!r} agent state into {self.environment_id!r}."
             )
+        agent_id = state.get("agent_id")
+        if agent_id and agent_id != self.agent_id:
+            raise ValueError(
+                f"Cannot load {agent_id!r} state into agent {self.agent_id!r}."
+            )
         self.config = dict(state.get("config", self.config))
         self.seed = int(state.get("seed", self.seed))
         self.memory_size = max(0, int(state.get("memory_size", self.memory_size)))
+        self.seat_id = int(state.get("seat_id", self.seat_id))
         memory = list(state.get("episode_memory", []))
         self.episode_memory = memory[-self.memory_size :] if self.memory_size else []
         self.episodes_seen = int(state.get("episodes_seen", len(self.episode_memory)))
+        self.training = bool(state.get("training", self.training))
         random_state = state.get("random_state")
         if random_state:
             self._random.setstate(ast.literal_eval(str(random_state)))

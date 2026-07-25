@@ -42,13 +42,17 @@ class RLCardPokerAdapter(EnvironmentAdapter):
     num_players = 2
     action_names: dict[int, str]
 
-    def __init__(self) -> None:
+    def __init__(self, num_players: int = 2) -> None:
+        self.num_players = int(num_players)
         self._env = None
         self._state: dict[str, Any] | None = None
         self._player_id = 0
 
     def reset(self, seed: int) -> Decision:
-        self._env = rlcard.make(self.rlcard_id, config={"seed": seed})
+        self._env = rlcard.make(
+            self.rlcard_id,
+            config={"seed": seed, "game_num_players": self.num_players},
+        )
         self._state, self._player_id = self._env.reset()
         return self._decision(self._state, self._player_id)
 

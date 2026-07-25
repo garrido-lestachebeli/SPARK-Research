@@ -6,10 +6,22 @@ from .agent_snapshots import (
     AgentSnapshotStore,
 )
 from .database import RunDatabase
+from .league import (
+    BUILTIN_OPPONENTS,
+    DEFAULT_ELO,
+    LeagueError,
+    LeagueMemberNotFound,
+    LeagueMemberStore,
+)
 
 __all__ = [
     "AgentSnapshotError",
     "AgentSnapshotNotFound",
     "AgentSnapshotStore",
+    "BUILTIN_OPPONENTS",
+    "DEFAULT_ELO",
+    "LeagueError",
+    "LeagueMemberNotFound",
+    "LeagueMemberStore",
     "RunDatabase",
 ]

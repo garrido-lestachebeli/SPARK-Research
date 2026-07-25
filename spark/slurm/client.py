@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import base64
+import json
 import re
 import shutil
 import subprocess
@@ -26,23 +28,31 @@ class SlurmClient:
 
     def submit_training(self, config: dict[str, Any]) -> str:
         self._require("sbatch")
-        script = self.project_root / "hpc" / "train.sbatch"
+        script = self.project_root / "app" / "hpc" / "train.sbatch"
         exports = {
             "SPARK_PROJECT_ROOT": str(self.project_root),
             "SPARK_RUN_ID": str(config["run_id"]),
             "SPARK_ENVIRONMENT": str(config["environment"]),
+            "SPARK_TABLE_SIZE": str(int(config.get("table_size", 2))),
             "SPARK_SEED": str(int(config.get("seed", 0))),
-            "SPARK_RUNS_DIRECTORY": str(config.get("runs_directory", "runs")),
+            "SPARK_RUNS_DIRECTORY": str(config.get("runs_directory", "data")),
             "SPARK_CHECKPOINT_INTERVAL": str(
                 int(config.get("checkpoint_interval", 100))
+            ),
+            "SPARK_UPDATE_INTERVAL": str(int(config.get("update_interval", 1))),
+            "SPARK_LEAGUE_REROLL_INTERVAL": str(
+                int(config.get("league_reroll_interval", 0))
             ),
             "SPARK_EPISODES": str(config.get("episodes") or ""),
             "SPARK_AGENT_MEMORY_SIZE": str(
                 int(config.get("agent_memory_size", 100))
             ),
-            "SPARK_SEPARATE_SEAT_AGENTS": (
-                "0" if config.get("shared_agents", True) else "1"
-            ),
+            "SPARK_SEAT_CONFIG_B64": base64.urlsafe_b64encode(
+                json.dumps(
+                    config.get("seat_configs") or [],
+                    separators=(",", ":"),
+                ).encode("utf-8")
+            ).decode("ascii"),
         }
         export_text = "ALL," + ",".join(
             f"{key}={self._safe_export(value)}" for key, value in exports.items()
@@ -75,7 +85,7 @@ class SlurmClient:
         wall_time: str = "08:00:00",
     ) -> str:
         self._require("sbatch")
-        script = self.project_root / "hpc" / "web.sbatch"
+        script = self.project_root / "app" / "hpc" / "web.sbatch"
         exports = {
             "SPARK_PROJECT_ROOT": str(self.project_root),
             "SPARK_WEB_PORT": str(port),
