@@ -167,7 +167,7 @@ class LeducDQNAgent(Agent):
         self.batch_size = int(
             self.config.get(
                 "batch_size",
-                64,
+                4,
             )
         )
 
