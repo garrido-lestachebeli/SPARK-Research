@@ -25,6 +25,7 @@ args=(
   --update-interval "${SPARK_UPDATE_INTERVAL:-1}"
   --league-reroll-interval "${SPARK_LEAGUE_REROLL_INTERVAL:-0}"
   --agent-memory-size "${SPARK_AGENT_MEMORY_SIZE:-100}"
+  --starting-stack "${SPARK_STARTING_STACK:-50}"
 )
 if [[ -n "${SPARK_SEAT_CONFIG_B64:-}" ]]; then
   args+=(--seat-config-b64 "${SPARK_SEAT_CONFIG_B64}")

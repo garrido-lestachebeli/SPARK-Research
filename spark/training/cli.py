@@ -76,6 +76,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=100,
         help="Maximum completed episodes retained in each agent checkpoint.",
     )
+    parser.add_argument(
+        "--starting-stack",
+        type=float,
+        default=50.0,
+        help="Chip buy-in for each seat at the start of a cash-session episode.",
+    )
     return parser
 
 
@@ -107,6 +113,7 @@ def main() -> None:
             agent_memory_size=max(0, args.agent_memory_size),
             update_interval=max(1, args.update_interval),
             league_reroll_interval=max(0, args.league_reroll_interval),
+            starting_stack=max(1.0, float(args.starting_stack)),
         )
     )
     completed = trainer.run(resume=not args.no_resume)

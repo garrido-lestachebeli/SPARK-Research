@@ -378,8 +378,8 @@ class RunDatabase:
         step_counts: list[float] = []
         durations: list[float] = []
         rolling: list[dict[str, Any]] = []
-        recent: list[float] = []
-        cumulative_sum = 0.0
+        recent_by_seat: dict[int, list[float]] = {}
+        cumulative_by_seat: dict[int, float] = {}
         for row in payoff_rows:
             payoffs = [float(value) for value in json.loads(row["payoffs_json"])]
             outcomes = json.loads(row["outcomes_json"])
@@ -390,19 +390,31 @@ class RunDatabase:
             for seat, outcome in enumerate(outcomes):
                 counts = outcome_counts.setdefault(seat, {"win": 0, "loss": 0, "draw": 0})
                 counts[outcome] = counts.get(outcome, 0) + 1
-            seat_zero = payoffs[0] if payoffs else 0.0
-            recent.append(seat_zero)
-            recent = recent[-rolling_limit:]
-            cumulative_sum += seat_zero
             episode_index = len(rolling) + 1
-            window_summary = descriptive.mean_ci(recent)
+            seat_points: dict[str, dict[str, Any]] = {}
+            for seat, payoff in enumerate(payoffs):
+                window = recent_by_seat.setdefault(seat, [])
+                window.append(payoff)
+                recent_by_seat[seat] = window[-rolling_limit:]
+                cumulative_by_seat[seat] = cumulative_by_seat.get(seat, 0.0) + payoff
+                window_summary = descriptive.mean_ci(recent_by_seat[seat])
+                seat_points[str(seat)] = {
+                    "average_payoff": window_summary["mean"],
+                    "ci_low": window_summary["ci_low"],
+                    "ci_high": window_summary["ci_high"],
+                    "cumulative_average": cumulative_by_seat[seat] / episode_index,
+                }
+            seat_zero = seat_points.get("0", {})
             rolling.append(
                 {
                     "episode": row["episode_number"],
-                    "seat_0_average_payoff": window_summary["mean"],
-                    "seat_0_ci_low": window_summary["ci_low"],
-                    "seat_0_ci_high": window_summary["ci_high"],
-                    "seat_0_cumulative_average": cumulative_sum / episode_index,
+                    "seats": seat_points,
+                    "seat_0_average_payoff": seat_zero.get("average_payoff", 0.0),
+                    "seat_0_ci_low": seat_zero.get("ci_low"),
+                    "seat_0_ci_high": seat_zero.get("ci_high"),
+                    "seat_0_cumulative_average": seat_zero.get(
+                        "cumulative_average", 0.0
+                    ),
                     "agent_version": row["agent_version"],
                 }
             )

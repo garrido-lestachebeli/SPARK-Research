@@ -39,6 +39,27 @@ class RLCardModelAgent(Agent):
             self._model_agent = loaded.agents[0]
         return self._model_agent
 
+    def action_probs(
+        self,
+        observation: dict[str, Any],
+        legal_actions: list[int],
+    ) -> dict[int, float]:
+        """Return the wrapped RLCard policy over legal actions (mixed or one-hot)."""
+        if not legal_actions:
+            raise ValueError("Agent received no legal actions.")
+        state = self._spark_to_rlcard_state(observation, legal_actions)
+        model = self._load()
+        vector = self._policy_vector(model, state, legal_actions)
+        if vector is not None:
+            return {
+                int(action): float(vector[int(action)])
+                for action in legal_actions
+            }
+        chosen = self._predict_deterministic(model, state, legal_actions)
+        if chosen not in legal_actions:
+            chosen = legal_actions[0]
+        return self._one_hot_action_probs(legal_actions, chosen)
+
     def select_action(
         self,
         observation: dict[str, Any],
@@ -50,7 +71,13 @@ class RLCardModelAgent(Agent):
             raise ValueError("Agent received no legal actions.")
         state = self._spark_to_rlcard_state(observation, legal_actions)
         model = self._load()
-        action = self._predict(model, state, legal_actions)
+        vector = self._policy_vector(model, state, legal_actions)
+        if vector is not None:
+            action = self._sample_from_probs(
+                [float(vector[int(action)]) for action in legal_actions]
+            )
+            return int(legal_actions[action])
+        action = self._predict_deterministic(model, state, legal_actions)
         if action not in legal_actions:
             return legal_actions[0]
         return action
@@ -59,7 +86,32 @@ class RLCardModelAgent(Agent):
         del episode
         return {}
 
-    def _predict(self, model: Any, state: dict[str, Any], legal_actions: list[int]) -> int:
+    def _policy_vector(
+        self,
+        model: Any,
+        state: dict[str, Any],
+        legal_actions: list[int],
+    ) -> np.ndarray | None:
+        """Return a full action-index probability vector when the model exposes one."""
+        if bool(getattr(model, "use_raw", False)):
+            return None
+        if hasattr(model, "action_probs") and hasattr(model, "average_policy"):
+            obs = np.asarray(state["obs"], dtype=np.float64)
+            probs = model.action_probs(
+                obs.tobytes(),
+                list(state["legal_actions"].keys()),
+                model.average_policy,
+            )
+            return np.asarray(probs, dtype=np.float64)
+        del legal_actions
+        return None
+
+    def _predict_deterministic(
+        self,
+        model: Any,
+        state: dict[str, Any],
+        legal_actions: list[int],
+    ) -> int:
         use_raw = bool(getattr(model, "use_raw", False))
         if use_raw:
             result = model.step(state)
@@ -76,16 +128,6 @@ class RLCardModelAgent(Agent):
             if isinstance(result, (int, np.integer)):
                 return int(result)
             return legal_actions[0]
-
-        # CFR and other encoded-policy agents (workaround for removed ndarray.tostring).
-        if hasattr(model, "action_probs") and hasattr(model, "average_policy"):
-            obs = np.asarray(state["obs"], dtype=np.float64)
-            probs = model.action_probs(
-                obs.tobytes(),
-                list(state["legal_actions"].keys()),
-                model.average_policy,
-            )
-            return self._sample_from_probs(list(probs))
 
         if hasattr(model, "eval_step"):
             action, _info = model.eval_step(state)

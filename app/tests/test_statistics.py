@@ -28,4 +28,7 @@ def test_statistics_include_confidence_intervals(tmp_path):
     assert "ci_low" in stats["seat_payoffs"]["0"]
     assert "win_rate" in stats["seat_outcomes"]["0"]
     assert stats["rolling"][-1]["seat_0_ci_low"] <= stats["rolling"][-1]["seat_0_average_payoff"]
+    assert "0" in stats["rolling"][-1]["seats"]
+    assert "1" in stats["rolling"][-1]["seats"]
+    assert "average_payoff" in stats["rolling"][-1]["seats"]["1"]
     assert stats["highlights"]["seat_0_win_rate_ci"][0] <= stats["highlights"]["seat_0_win_rate"]

@@ -13,6 +13,7 @@ from typing import Any
 
 from spark.agents import Agent, create_agent, default_agent_id
 from spark.environments import create_environment
+from spark.environments.rlcard_poker import DEFAULT_STARTING_STACK
 from spark.league import update_ratings
 from spark.models import (
     Episode,
@@ -40,6 +41,7 @@ class TrainerConfig:
     agent_memory_size: int = 100
     update_interval: int = 1
     league_reroll_interval: int = 0
+    starting_stack: float = DEFAULT_STARTING_STACK
 
 
 class Trainer:
@@ -47,10 +49,15 @@ class Trainer:
         self.config = config
         self.config.update_interval = max(1, int(config.update_interval))
         self.config.league_reroll_interval = max(0, int(config.league_reroll_interval))
+        self.config.starting_stack = max(1.0, float(config.starting_stack))
         self.run_path = Path(config.run_directory) / config.run_id
         self.run_path.mkdir(parents=True, exist_ok=True)
         self.database = RunDatabase(self.run_path / "run.sqlite")
-        self.environment = create_environment(config.environment, config.table_size)
+        self.environment = create_environment(
+            config.environment,
+            config.table_size,
+            starting_stack=self.config.starting_stack,
+        )
         self.seat_configs = self._normalize_seat_configs()
         self.agents: dict[int, Agent] = self._create_agents()
         self.agent_version = 0
@@ -464,6 +471,9 @@ class Trainer:
             self.config.league_reroll_interval = max(
                 0, int(saved_config["league_reroll_interval"])
             )
+        if "starting_stack" in saved_config:
+            self.config.starting_stack = max(1.0, float(saved_config["starting_stack"]))
+            self.environment.starting_stack = self.config.starting_stack
         self.database.add_event(
             "resumed", f"Loaded checkpoint at episode {self.next_episode_number}."
         )

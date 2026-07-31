@@ -1,4 +1,10 @@
-"""RLCard poker adapter with strict observable/hidden-state separation."""
+"""RLCard poker adapter with strict observable/hidden-state separation.
+
+An episode is a cash session: players start with a shared chip stack and keep
+playing hands until someone can no longer post the big blind (bust), or a
+safety max-hand limit is hit. Terminal payoffs are net chip change over the
+session so agents can learn multi-hand play style.
+"""
 
 from __future__ import annotations
 
@@ -10,6 +16,11 @@ import rlcard
 from .base import Decision, EnvironmentAdapter
 
 LIMIT_ACTIONS = {0: "call", 1: "raise", 2: "fold", 3: "check"}
+
+# Buy-in for a session. Small enough that random-agent tests finish quickly,
+# large enough for several hands of play-style signal before someone busts.
+DEFAULT_STARTING_STACK = 50.0
+DEFAULT_MAX_HANDS = 500
 
 
 def jsonify(value: Any) -> Any:
@@ -42,43 +53,72 @@ class RLCardPokerAdapter(EnvironmentAdapter):
     num_players = 2
     action_names: dict[int, str]
 
-    def __init__(self, num_players: int = 2) -> None:
+    def __init__(
+        self,
+        num_players: int = 2,
+        *,
+        starting_stack: float = DEFAULT_STARTING_STACK,
+        max_hands: int = DEFAULT_MAX_HANDS,
+    ) -> None:
         self.num_players = int(num_players)
+        self.starting_stack = float(starting_stack)
+        self.max_hands = max(1, int(max_hands))
         self._env = None
         self._state: dict[str, Any] | None = None
         self._player_id = 0
+        self._stacks: list[float] = []
+        self._hand_index = 0
+        self._base_seed = 0
+        self._episode_done = False
+        self._big_blind = 2.0
 
     def reset(self, seed: int) -> Decision:
-        self._env = rlcard.make(
-            self.rlcard_id,
-            config={"seed": seed, "game_num_players": self.num_players},
-        )
-        self._state, self._player_id = self._env.reset()
-        return self._decision(self._state, self._player_id)
+        self._base_seed = int(seed)
+        self._hand_index = 0
+        self._episode_done = False
+        self._stacks = [self.starting_stack for _ in range(self.num_players)]
+        return self._start_hand()
 
     def step(self, action: int) -> Decision | None:
         if self._env is None or self._state is None:
             raise RuntimeError("Environment must be reset before stepping.")
+        if self._episode_done:
+            return None
         legal = list(self._state["legal_actions"].keys())
         if action not in legal:
             raise ValueError(f"Illegal action {action}; legal actions are {legal}")
         self._state, self._player_id = self._env.step(action)
-        if self._env.is_over():
+        if not self._env.is_over():
+            return self._decision(self._state, self._player_id)
+
+        hand_payoffs = [float(value) for value in self._env.get_payoffs()]
+        for index, delta in enumerate(hand_payoffs):
+            self._stacks[index] = float(self._stacks[index] + delta)
+
+        if self._session_should_end():
+            self._episode_done = True
+            self._state = None
             return None
-        return self._decision(self._state, self._player_id)
+
+        self._hand_index += 1
+        return self._start_hand()
 
     @property
     def done(self) -> bool:
-        return bool(self._env is not None and self._env.is_over())
+        return self._episode_done
 
     def payoffs(self) -> list[float]:
-        if self._env is None or not self._env.is_over():
+        if not self._episode_done:
             raise RuntimeError("Payoffs are only available after the episode ends.")
-        return [float(value) for value in self._env.get_payoffs()]
+        return [float(stack - self.starting_stack) for stack in self._stacks]
 
     def hidden_state(self) -> dict[str, Any]:
         if self._env is None:
-            return {}
+            return {
+                "stacks": list(self._stacks),
+                "hand_index": self._hand_index,
+                "starting_stack": self.starting_stack,
+            }
         try:
             info = dict(self._env.get_perfect_information())
         except Exception:
@@ -89,15 +129,44 @@ class RLCardPokerAdapter(EnvironmentAdapter):
                 value = getattr(game, attribute, None)
                 if value is not None and attribute not in info:
                     info[attribute] = value
-        return jsonify(info)
+        info = jsonify(info)
+        info["stacks"] = list(self._stacks)
+        info["hand_index"] = self._hand_index
+        info["starting_stack"] = self.starting_stack
+        info["big_blind"] = self._big_blind
+        return info
+
+    def _start_hand(self) -> Decision:
+        config: dict[str, Any] = {
+            "seed": self._base_seed + self._hand_index * 100_003,
+            "game_num_players": self.num_players,
+        }
+        if self.rlcard_id == "no-limit-holdem":
+            # RLCard gives every seat the same buy-in for a hand; use the shortest
+            # remaining stack so all-ins cannot exceed true session chips.
+            config["chips_for_each"] = max(1, int(min(self._stacks)))
+        self._env = rlcard.make(self.rlcard_id, config=config)
+        self._big_blind = float(getattr(self._env.game, "big_blind", 2) or 2)
+        self._state, self._player_id = self._env.reset()
+        return self._decision(self._state, self._player_id)
+
+    def _session_should_end(self) -> bool:
+        if self._hand_index + 1 >= self.max_hands:
+            return True
+        # Bust = cannot post the next big blind.
+        return any(stack < self._big_blind for stack in self._stacks)
 
     def _decision(self, state: dict[str, Any], player_id: int) -> Decision:
         raw = dict(state.get("raw_obs", {}) or {})
-        # Encoded observation is retained for model inputs; raw_obs makes replay readable.
         observation = {
             "raw": jsonify(raw),
             "encoded": jsonify(state.get("obs")),
             "action_record": jsonify(state.get("action_record", [])),
+            "stacks": list(self._stacks),
+            "my_stack": float(self._stacks[int(player_id)]),
+            "hand_index": self._hand_index,
+            "starting_stack": self.starting_stack,
+            "big_blind": self._big_blind,
         }
         return Decision(
             player_id=int(player_id),

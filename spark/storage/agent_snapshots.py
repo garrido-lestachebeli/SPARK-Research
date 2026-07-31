@@ -157,6 +157,7 @@ class AgentSnapshotStore:
         agent_memory_size: int,
         update_interval: int = 1,
         league_reroll_interval: int = 0,
+        starting_stack: float = 50.0,
         league_store: Any | None = None,
     ) -> Path:
         run_id = self._run_id(run_id)
@@ -238,6 +239,7 @@ class AgentSnapshotStore:
                 "agent_memory_size": agent_memory_size,
                 "update_interval": max(1, int(update_interval)),
                 "league_reroll_interval": max(0, int(league_reroll_interval)),
+                "starting_stack": max(1.0, float(starting_stack)),
             },
             "next_episode_number": 0,
             "agent_version": 0,

@@ -1,265 +1,46 @@
 # SPARK Research
 
-Infrastructure for reinforcement-learning research in stochastic, partially
-observable poker environments. The project supports **Leduc**, **Limit Texas**,
-and **No-Limit Texas Hold'em** through [RLCard](https://github.com/datamllab/rlcard),
-with continuous training workers, a League opponent roster, and a FastAPI
-dashboard for campaigns, statistics, and full-state replay on local machines or
-the MSOE ROSIE cluster.
+SPARK is infrastructure for reinforcement-learning research in imperfect-information
+poker. It supports **Leduc**, **Limit Texas**, and **No-Limit Texas Hold'em** via
+[RLCard](https://github.com/datamllab/rlcard).
+
+You can train agents from the command line or through a web dashboard that launches
+campaigns (locally or on the MSOE ROSIE cluster), manages a **League** of opponents,
+tracks **ELO**, and lets you replay full episodes with both visible and hidden state.
 
 ## Repository layout
 
-The repo has three top-level folders with clear jobs:
+Everything sits in three top-level folders:
 
-```text
-SPARK-Research/
-  spark/     # Research code — environments, agents, training, league algorithms
-  data/      # Generated artifacts — episodes, campaigns, checkpoints, league files
-  app/       # Platform — dashboard UI/API, HPC scripts, tests
-  README.md
-  requirements.txt
-  requirements-dev.txt
-  pytest.ini
-```
 
-| Folder | What belongs here | When you open it |
-| --- | --- | --- |
-| [`spark/`](#spark-research-code) | Python you read and change for research | New agents, envs, learning rules, league algorithms |
-| [`data/`](#data-storage) | Runtime outputs (gitignored) | Inspect runs, checkpoints, league member files |
-| [`app/`](#app-platform) | Dashboard, Slurm helpers, pytest | Launch UI, submit jobs, run tests |
+| Folder   | What it is                                                                 |
+| -------- | -------------------------------------------------------------------------- |
+| `spark/` | Research code you edit — environments, agents, trainer, league algorithms  |
+| `data/`  | Runtime output — episode DBs, checkpoints, league files, logs (gitignored) |
+| `app/`   | Platform — FastAPI dashboard, Slurm helpers, tests                         |
 
-If you still have an older local `runs/` directory from before this layout,
-rename it once:
-
-```bash
-mv runs data
-```
-
----
-
-## `spark/` — research code
 
 ```text
 spark/
-  agents/                 Agent contract, registry, and per-environment implementations
-    base.py               Abstract Agent API
-    registry.py           Discovers Agent subclasses under spark.agents.*
-    rlcard_model.py       Evaluate-only wrappers for RLCard model-zoo bots
-    leduc_holdem/         Random, Q-learning, CFR, rule bots
-    limit_holdem/         Random, rule bots
-    no_limit_holdem/      Random baseline
-  environments/           Shared adapters + legacy collectors
-    leduc.py / limit_holdem.py / no_limit_holdem.py
-    rlcard_poker.py       Shared RLCard adapter
-    registry.py
-    LeducPoker/           Legacy CLI collector (archived)
-    LimitHoldem/          Legacy CLI collector (archived)
-    NoLimitHoldem/        Legacy CLI collector (archived)
-  league/                 Research algorithms for the League (stubs today)
-    elo.py                Win-rate pairwise ELO transfers after each N-episode window
-    evolution.py          Planned Lamarckian evolution over trained members
-  storage/                Persistence *code* (not the files themselves)
-    database.py           Per-run SQLite schema and queries
-    league.py             League member JSON store under data/league-members/
-    agent_snapshots.py    Agent library snapshots under data/agent-snapshots/
-    import_export.py      Legacy JSON import / portable JSON export
-    stats.py              Aggregate statistics for the dashboard
-  training/               Continuous trainer and CLI entry point
-  slurm/                  Safe sbatch / squeue / scancel wrapper
-  EXAMPLE/                Teaching notebooks (Battleship DQN / classical RL)
-  models.py               Shared episode / step dataclasses
-```
-
-### Environments
-
-Modern training uses the adapters in `spark/environments/` (`leduc-holdem`,
-`limit-holdem`, `no-limit-holdem`). They expose a shared interface: reset, step
-through decisions, and record both **player-visible** observations and **hidden**
-perfect information for replay.
-
-The folders `LeducPoker/`, `LimitHoldem/`, and `NoLimitHoldem/` under
-`spark/environments/` are older standalone collectors kept for reference. New
-work should use the shared adapters and `python -m spark.training.cli`.
-
-### Agents
-
-Each implementation lives under the matching package:
-
-```text
-spark/agents/<environment_package>/<name>_agent.py
-```
-
-The registry maps environment IDs to packages:
-
-| Environment ID | Package |
-| --- | --- |
-| `leduc-holdem` | `spark.agents.leduc_holdem` |
-| `limit-holdem` | `spark.agents.limit_holdem` |
-| `no-limit-holdem` | `spark.agents.no_limit_holdem` |
-
-Add a new agent by dropping a module into the right package:
-
-```python
-# spark/agents/leduc_holdem/my_agent.py
-from spark.agents.base import Agent
-
-class MyLeducAgent(Agent):
-    agent_id = "my-leduc-agent"
-    name = "My Leduc Agent"
-    environment_id = "leduc-holdem"
-
-    def select_action(self, observation, legal_actions, player_id):
-        return legal_actions[0]
-
-    def update(self, episode):
-        return {"loss": 0.0}
-
-    def state_dict(self):
-        return {}
-
-    def load_state_dict(self, state):
-        ...
-```
-
-Agent IDs must be unique. Invalid or duplicate modules are reported by
-`/api/config` without hiding healthy agents. Each table seat gets its own agent
-instance and can train or run frozen in evaluation mode independently.
-
-### Training loop
-
-`spark/training/trainer.py` plays episodes, buffers learning updates, checkpoints
-agent state, and optionally re-rolls League opponents. Entry point:
-
-```bash
-python -m spark.training.cli \
-  --environment leduc-holdem \
-  --run-id leduc-demo \
-  --episodes 1000 \
-  --seed 42
-```
-
-Omit `--episodes` to run until interrupted. Ctrl+C finishes the current action
-sequence, saves a checkpoint, and marks the run stopped. Re-running the same
-`--run-id` resumes from `data/<run-id>/checkpoint.json`.
-
-Per episode (simplified):
-
-1. The acting agent sees only its observation and legal actions.
-2. Visible and hidden states are recorded for replay.
-3. The episode is committed to SQLite under `data/<run-id>/`.
-4. Training seats buffer the episode; every **N** episodes (`--update-interval`)
-   the trainer calls `agent.update(episode)` for each buffered episode.
-5. League-backed training seats persist `state_dict()` back to the League store.
-6. Checkpoints advance so jobs can resume or requeue on Slurm.
-
-### Storage code vs `data/`
-
-`spark/storage/` is **code**: schemas, writers, and readers. The files those APIs
-create live under [`data/`](#data-storage). Do not put large generated databases
-inside `spark/`.
-
-### League research (`spark/league/`)
-
-Campaigns use a League **roster** (active vs bench members) persisted by
-`spark.storage.league.LeagueMemberStore`.
-
-**ELO (`spark/league/elo.py`)**
-
-1. Every new member starts at **1000**.
-2. After each training window of **N** episodes (`update_interval`), the trainer
-   computes each League-backed seat's win rate over that window.
-3. Every unordered pair of those members is compared once. Points move with
-   `transfer_points(winrate_a, winrate_b, elo_a, elo_b)`:
-   - win-rate ratio near 1:1 → small transfer
-   - outperforming a lower-rated opponent → fewer points gained than an upset of
-     a higher-rated one (standard ELO expectation term)
-4. Transfers are zero-sum; updated ratings are written back to
-   `data/league-members/`.
-
-Fresh (non-League) seats do not participate in ELO. At least two League-backed
-seats must be present for an update.
-
-**Lamarckian evolution (`spark/league/evolution.py`)** remains a stub
-(`propose_offspring` / `inherit_state` raise `NotImplementedError`).
-
-Import surface:
-
-```python
-from spark.league import expected_score, transfer_points, update_ratings, LamarckianEvolution
-```
-
-### EXAMPLE notebooks
-
-`spark/EXAMPLE/` holds teaching material (e.g. Battleship DQN). It is not used by
-the trainer or dashboard.
-
----
-
-## `data/` — storage
-
-Generated at runtime (gitignored). Override the root with
-`SPARK_RUNS_DIRECTORY` if needed; the default is `data/` at the project root.
-
-```text
-data/
-  dashboard.sqlite              # Campaign and job index for the UI
-  agent-snapshots/              # Optional Agent library warm-starts
-    agent-*.json
-  league-members/               # League roster (active + bench)
-    league-*.json
-  <run-id>/
-    run.sqlite                  # Episodes, steps, metrics, events
-    checkpoint.json             # Resumable seat agent states
-    worker.log                  # Local campaign worker stdout
-  slurm-%j.out / .err           # Slurm training logs
-  spark-web-%j.out / .err       # Slurm dashboard logs
-```
-
-Each worker is the sole writer to its own `run.sqlite`. The dashboard opens
-short-lived read connections and aggregates statistics in SQL.
-
-### Import / export
-
-```python
-from spark.storage import RunDatabase
-from spark.storage.import_export import import_legacy_json, export_json
-
-database = RunDatabase("data/imported-leduc/run.sqlite")
-import_legacy_json(
-    "/path/to/legacy/episodes.json",
-    database,
-    run_id="imported-leduc",
-)
-
-database = RunDatabase("data/leduc-demo/run.sqlite", initialize=False)
-export_json(database, "data/leduc-demo/leduc-demo.json")
-```
-
-The dashboard also exposes `GET /api/runs/<run-id>/export`.
-
----
-
-## `app/` — platform
-
-```text
+  agents/           Per-environment agent implementations (auto-discovered)
+  environments/     RLCard adapters for the three poker variants
+  league/           ELO updates; Lamarckian evolution stub
+  storage/          Code that reads/writes data/ (SQLite, league JSON, snapshots)
+  training/         Online trainer and CLI
+  slurm/            Safe wrappers around sbatch / squeue / scancel
 app/
-  app.py                 FastAPI application
-  services/              Campaigns, run listing, dashboard SQLite index
-  templates/             Dashboard HTML
-  static/                Local CSS and JavaScript (no CDN)
-  hpc/                   Rosie / Slurm scripts
-    setup_rosie.sh
-    start_dashboard.sh
-    run_dashboard_ondemand.sh
-    train.sbatch
-    web.sbatch
-  tests/                 Pytest suite
+  app.py, static/, templates/   Dashboard
+  hpc/                          Rosie setup and sbatch scripts
+  tests/                        Pytest suite
+data/
+  <run-id>/run.sqlite, checkpoint.json
+  league-members/, agent-snapshots/, dashboard.sqlite
 ```
 
-You normally do not need to change this for research experiments, except when
-extending the dashboard API or cluster launch path.
+When doing research, spend most of your time in `spark/agents/` and `spark/league/`.
+Use `data/` to inspect results; change `app/` only when extending the UI or cluster path.
 
-### Local setup
+## Setup
 
 Python 3.10+ recommended.
 
@@ -272,13 +53,13 @@ source .venv/bin/activate
 # Windows PowerShell
 .\.venv\Scripts\Activate.ps1
 
-python -m pip install -r requirements-dev.txt
-python -m pytest
+pip install -r requirements-dev.txt
+pytest
 ```
 
-### Training from the CLI
 
-Finite Leduc experiment:
+
+## Training from the CLI
 
 ```bash
 python -m spark.training.cli \
@@ -288,63 +69,36 @@ python -m spark.training.cli \
   --seed 42
 ```
 
-Continuous Limit Hold'em until interrupted:
+Omit `--episodes` to run until you press Ctrl+C. The worker finishes the current
+hand, writes a checkpoint, and stops cleanly. Re-running the same `--run-id`
+resumes from `data/<run-id>/checkpoint.json`.
 
-```bash
-python -m spark.training.cli \
-  --environment limit-holdem \
-  --run-id limit-continuous \
-  --checkpoint-interval 100 \
-  --seed 42
-```
+Useful flags:
 
-Useful flags: `--update-interval N`, `--league-reroll-interval K`,
-`--table-size`, `--seat-config-b64`, `--run-directory` (default `data`).
 
-### Web dashboard
+| Flag                         | Meaning                                                            |
+| ---------------------------- | ------------------------------------------------------------------ |
+| `--update-interval N`        | Buffer N episodes, then call `update()` on all of them (default 1) |
+| `--league-reroll-interval K` | Re-roll random League seats every K episodes (`0` = never)         |
+| `--table-size`               | Players for Limit / No-Limit (2–10)                                |
+| `--starting-stack`           | Chip buy-in at the start of each session episode (default 50)      |
+| `--run-directory`            | Override the default `data/` root                                  |
 
-Capabilities:
 
-- Start a campaign with independent jobs per selected environment
-- Choose table size for Limit / No-Limit (2–10 seats)
-- Seat players from **Fresh implementation**, a specific **League member**, or
-  **League (random)** from the active roster
-- Buffer learning with **update interval N**; re-roll random League seats every
-  **K** episodes (`K=0` keeps one opponent)
-- Monitor, stop, and remove jobs; inspect worker logs
-- Manage League (active vs Bench), seed built-in RLCard bots
-- Optional Agent library snapshots for Fresh warm-starts
-- Rolling payoff / outcomes / action frequencies / throughput
-- Episode browser with step-by-step visible vs hidden state
-- JSON export of a run
+Each **episode** is a cash session: players start with a chip stack (default 50)
+and keep playing hands until someone cannot post the big blind (bust), or a
+safety hand limit is reached. Terminal payoffs are net chips won or lost over
+the whole session. Observations include `stacks`, `my_stack`, and `hand_index`
+so agents can condition on bankroll across hands.
 
-#### Campaign seat sources
+Player-visible observations are stored separately from hidden perfect
+information, so the dashboard can show exactly what the agent saw versus the
+true cards. Training seats only learn from their own observations via
+`agent.update()`.
 
-| Source | Behavior |
-| --- | --- |
-| Fresh implementation | Pick an agent class + Train/Evaluate; optional library warm-start |
-| League member | Seat a specific member; uses that member's train/snapshot mode |
-| League (random) | Sample an **active** League member at submit time |
+## Dashboard
 
-**Update interval (N):** buffer completed episodes; every N episodes call
-`update()` on each buffered episode for training seats, then clear the buffer.
-Stopping a run flushes any leftover buffer.
-
-**League re-roll (K):** for `league_random` seats only. `K=0` keeps the resolved
-member for the whole campaign. `K>0` re-samples every K episodes. Training seats
-write state back to `data/league-members/` before a re-roll and on checkpoints.
-
-#### League vs Agent library
-
-- **League** (`data/league-members/`): primary opponent roster for campaigns.
-  Active members are drawn by random seats; Bench is sidelined. ELO starts at
-  1000 and updates from pairwise win-rate comparisons after each N-episode
-  training window (see `spark/league/elo.py`).
-- **Agent library** (`data/agent-snapshots/`): optional warm-starts for Fresh
-  seats. Prefer importing snapshots into the League when you want them in the
-  pool. Collapsed under **Advanced** in the Campaigns UI.
-
-#### On your PC
+Local launch:
 
 ```bash
 # Linux/macOS
@@ -356,75 +110,198 @@ py -m uvicorn app.app:app --reload --host 127.0.0.1 --port 8000
 ```
 
 Open [http://127.0.0.1:8000](http://127.0.0.1:8000). Without `SPARK_LOCAL_JOBS=1`
-and without Slurm, the dashboard is read-only for launching campaigns.
+(and without Slurm), you can browse runs but cannot start new campaign workers.
 
-#### On Rosie (Open OnDemand)
+From the UI you can:
 
-Rosie compute hosts (`dh-node*`) are usually not in campus DNS. Prefer Open
-OnDemand over SSH tunnels to compute nodes:
-[https://dh-ood.hpc.msoe.edu](https://dh-ood.hpc.msoe.edu).
+- Start a campaign across one or more environments
+- Seat each player, set N / K, seed, episode limit, and Slurm resources
+- Monitor jobs, stop them, and read worker logs
+- Manage the League roster and optional Agent library snapshots
+- View statistics and step through episode replays
 
-Prepare the environment:
+
+
+### Campaign seats
+
+
+| Source               | Behavior                                                                   |
+| -------------------- | -------------------------------------------------------------------------- |
+| Fresh implementation | New agent instance (Train or Evaluate); optional library warm-start        |
+| League member        | Load a specific roster member; mode follows that member (train / snapshot) |
+| League (random)      | Draw an **active** League member at submit time                            |
+
+
+**Update interval (N):** episodes are buffered; every N completed episodes the
+trainer runs `update()` on each buffered episode for training seats, then clears
+the buffer. Stopping a run flushes any leftover buffer so learning is not lost.
+
+**Starting stack:** chip buy-in for each seat at the start of a session episode
+(default 50). Play continues until someone cannot post the big blind.
+
+**League re-roll (K):** only for `League (random)` seats. `K = 0` keeps the same
+opponent for the whole campaign. `K > 0` samples a new active member every K
+episodes (preferring a different one when the pool has more than one). Training
+seats write their weights back to the League before a re-roll.
+
+### League and Agent library
+
+The **League** (`data/league-members/`) is the main opponent roster. Members are
+either **active** (eligible for random seats) or on the **Bench**. You can create
+blank agents, import snapshots, seed built-in RLCard bots, and toggle train vs
+snapshot mode.
+
+**ELO** starts at **1000**. After each N-episode training window, every unordered
+pair of League-backed seats at the table is compared using win rates over that
+window. Points transfer with `spark/league/elo.py`: near 1:1 win rates move few
+points, and beating a much weaker (lower-ELO) opponent yields less than an upset
+of a stronger one. Transfers are zero-sum and written back to the member files.
+Fresh (non-League) seats do not participate; at least two League seats are required.
+
+The **Agent library** (`data/agent-snapshots/`) is a secondary store for warm-starting
+Fresh seats. Prefer the League as the live roster; import library snapshots into
+the League when you want them in the pool.
+
+Lamarckian evolution hooks live in `spark/league/evolution.py` but are not
+implemented yet.
+
+## Rosie (MSOE HPC)
+
+Rosie compute nodes are usually not reachable by SSH from a laptop. Use Open
+OnDemand: [https://dh-ood.hpc.msoe.edu](https://dh-ood.hpc.msoe.edu).
 
 ```bash
 cd ~/SummerResearch   # or your clone path
 bash app/hpc/setup_rosie.sh
 source .venv/bin/activate
-```
 
-If needed: `module load python` (check `module avail python` first).
-
-Start the dashboard in an OnDemand shell that is already on a compute node:
-
-```bash
+# From a Shell Access / interactive job already on dh-node*:
 bash app/hpc/run_dashboard_ondemand.sh
 ```
 
-Open the printed URL (keep `?token=...`):
+Open the printed URL (keep `?token=...`). If `/rnode/` fails, try `/node/...`.
 
-```text
-https://dh-ood.hpc.msoe.edu/rnode/dh-node2/8000/?token=TOKEN
+Campaigns on Rosie submit one Slurm job per environment via `app/hpc/train.sbatch`.
+Near the wall-time limit the job checkpoints and requeues so training can continue.
+Stop a job from the dashboard or with `scancel`. See the
+[ROSIE User Guide](https://msoe.dev/#/) for partitions and limits.
+
+## Adding an agent
+
+Put a new class under the matching package — `spark/agents/leduc_holdem/`,
+`limit_holdem/`, or `no_limit_holdem/`. The registry discovers every `Agent`
+subclass when the trainer or dashboard starts:
+
+```python
+# spark/agents/leduc_holdem/my_agent.py
+from spark.agents.base import Agent
+
+class MyLeducAgent(Agent):
+    agent_id = "my-leduc-agent"
+    name = "My Leduc Agent"
+    environment_id = "leduc-holdem"
+
+    def select_action(self, observation, legal_actions, player_id):
+        # observation has no opponent hole cards / perfect info
+        return legal_actions[0]
+
+    def update(self, episode):
+        # Learn from the completed trajectory and terminal payoffs
+        return {"loss": 0.0}
+
+    def state_dict(self):
+        return {}
+
+    def load_state_dict(self, state):
+        ...
 ```
 
-If `/rnode/` fails, try `/node/...`. After code updates, restart the script and
-hard-refresh the browser.
+Agent IDs must be unique. `environment_id` must match the package. Each seat gets
+its own instance and can train or evaluate independently.
 
-Optional: submit the dashboard as a Slurm job:
 
-```bash
-bash app/hpc/start_dashboard.sh
-cat data/spark-web-JOB_ID.out
+| Goal                        | Where to edit                 |
+| --------------------------- | ----------------------------- |
+| New agent                   | `spark/agents/<env_package>/` |
+| Game / observation adapter  | `spark/environments/`         |
+| ELO formula                 | `spark/league/elo.py`         |
+| Evolution / population      | `spark/league/evolution.py`   |
+| Train cadence / checkpoints | `spark/training/`             |
+| Dashboard or API            | `app/`                        |
+| Cluster scripts             | `app/hpc/`                    |
+
+
+
+
+## Bayesian hidden-state inference (work in progress)
+
+Goal: when an opponent acts, update a belief over their hole card using their known policy and Bayes' rule
+
+### `agent.action_probs(observation, legal_actions)`
+
+Returns the likelihood ingredient: π(a | observation) over currently legal actions.
+
+**Signature**
+
+```python
+probs = agent.action_probs(observation, legal_actions)  # -> dict[int, float]
 ```
 
-#### Continuous Slurm training
+**Return format**
 
-From the Rosie dashboard, a campaign submits one Slurm job per environment via
-`app/hpc/train.sbatch` with `--requeue`. Two minutes before the wall-time limit,
-Slurm sends `USR1`; the worker checkpoints and the job requeues. Use the
-dashboard Stop button or `scancel JOB_ID` to halt a campaign.
+- `dict[int, float]` mapping each **legal** action id → probability
+- Values are ≥ 0 and sum to `1.0`
+- Illegal actions are omitted (not listed as 0)
 
-Confirm current partitions and limits in the
-[ROSIE User Guide](https://msoe.dev/#/).
+Example (Leduc legal set `[0, 1, 2]` = call / raise / fold):
 
----
+```python
+{0: 0.25, 1: 0.50, 2: 0.25}
+```
 
-## Environment status
+For a Bayes update, use only the observed action:
 
-| Environment | Status |
-| --- | --- |
-| Leduc Hold'em | Enabled (`rlcard.make("leduc-holdem")`) |
-| Limit Texas Hold'em | Enabled, 2–10 players |
-| No-Limit Texas Hold'em | Enabled, 2–10 players |
+```python
+likelihood = agent.action_probs(obs_for_hypothesized_card, legal)[observed_action]
+```
 
-## Extending SPARK
+**Where it lives**
 
-| Goal | Where to work |
-| --- | --- |
-| New learning agent | `spark/agents/<env_package>/` |
-| New or changed game rules / adapter | `spark/environments/` |
-| Win-rate League ELO | `spark/league/elo.py` |
-| Population / Lamarckian evolution | `spark/league/evolution.py` |
-| Trainer cadence / checkpoints | `spark/training/` |
-| Dashboard UI or API | `app/` |
-| Cluster launch scripts | `app/hpc/` |
-| Inspect episodes / league files | `data/` |
+
+| Agent            | File                                   | Behavior                                                     |
+| ---------------- | -------------------------------------- | ------------------------------------------------------------ |
+| Default / random | `spark/agents/base.py`                 | Uniform over `legal_actions`                                 |
+| Q-learning       | `spark/agents/leduc_holdem/q_agent.py` | ε-greedy mix while training; greedy one-hot while evaluating |
+| CFR / rule bots  | `spark/agents/rlcard_model.py`         | CFR: mixed average policy; rules: one-hot on chosen action   |
+
+
+CFR and rule agents inherit from `RLCardModelAgent`; they do not redefine the method.
+
+**Observation format**
+
+Same player-visible dict the environment already builds (`decision.observation` /
+`step.visible_before`):
+
+```python
+{
+    "raw": {...},           # e.g. hand, public_card, chips, ...
+    "encoded": [...],       # float vector (Leduc length 36)
+    "action_record": [...],
+    "stacks": [...],
+    "my_stack": float,
+    "hand_index": int,
+    "starting_stack": float,
+    "big_blind": float,
+}
+```
+
+`action_probs` does **not** loop over possible hole cards. Each call assumes one
+info state already encoded in `observation`. The Bayes loop (still to build)
+calls it once per hypothesized card after constructing a matching `obs_c`.
+
+**Still to implement**
+
+- Prior / posterior belief over opponent cards
+- Constructing hypothetical opponent observations for each card hypothesis
+- A Bayes agent that updates on opponent actions and uses the belief to act
+

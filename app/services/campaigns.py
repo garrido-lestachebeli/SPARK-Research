@@ -51,6 +51,7 @@ class CampaignService:
         config["league_reroll_interval"] = max(
             0, int(config.get("league_reroll_interval", 0))
         )
+        config["starting_stack"] = max(1.0, float(config.get("starting_stack", 50)))
 
         campaign_id = f"campaign-{uuid.uuid4().hex[:10]}"
         name = str(config.get("name") or campaign_id)
@@ -81,6 +82,7 @@ class CampaignService:
                 agent_memory_size=int(config.get("agent_memory_size", 100)),
                 update_interval=int(config["update_interval"]),
                 league_reroll_interval=int(config["league_reroll_interval"]),
+                starting_stack=float(config.get("starting_stack", 50)),
                 league_store=self.league,
             )
             if self.slurm.available:
@@ -324,6 +326,9 @@ class CampaignService:
                     config.get("league_reroll_interval", 0),
                 )
             )
+            config["starting_stack"] = float(
+                run_config.get("starting_stack", config.get("starting_stack", 50))
+            )
         self.runs.clear_stop(run_id)
         if self.slurm.available:
             scheduler_id = self.slurm.submit_training(config)
@@ -389,6 +394,8 @@ class CampaignService:
             str(config.get("league_reroll_interval", 0)),
             "--agent-memory-size",
             str(config.get("agent_memory_size", 100)),
+            "--starting-stack",
+            str(config.get("starting_stack", 50)),
         ]
         if config.get("seat_configs"):
             command.extend(

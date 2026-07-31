@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>SPARK Training Console</title>
   <!-- Relative paths so Open OnDemand /rnode and /node proxies work. -->
-  <link rel="stylesheet" href="static/style.css">
+  <link rel="stylesheet" href="static/style.css?v=chart-warmup-1">
 </head>
 <body>
   <header class="topbar">
@@ -37,6 +37,7 @@
       </div>
 
       <section class="overview-section">
+        <div id="seat-lineup" class="seat-lineup" aria-label="Select a seat to view statistics"></div>
         <div id="stat-cards" class="snapshot-grid"></div>
       </section>
 
@@ -45,7 +46,7 @@
           <div class="panel-title">
             <div>
               <p class="eyebrow">Trend</p>
-              <h3>Seat 0 payoff over training</h3>
+              <h3 id="payoff-chart-title">Payoff over training</h3>
             </div>
             <span id="trend-window">Last 100 episodes</span>
           </div>
@@ -61,16 +62,16 @@
         <div class="overview-heading">
           <div>
             <p class="eyebrow">Gameplay behavior</p>
-            <h3>Results by seat</h3>
+            <h3>Results by agent</h3>
           </div>
         </div>
         <div class="breakdown-grid">
           <article class="panel">
-            <div class="panel-title"><h3>Payoffs</h3><span>Overall and recent</span></div>
+            <div class="panel-title"><h3>Payoffs by agent</h3><span>Overall and recent</span></div>
             <div id="payoff-summary" class="metric-table"></div>
           </article>
           <article class="panel">
-            <div class="panel-title"><h3>Outcomes</h3><span>Wilson 95% CI</span></div>
+            <div class="panel-title"><h3>Outcomes by agent</h3><span>Wilson 95% CI</span></div>
             <div id="outcome-grid"></div>
           </article>
         </div>
@@ -95,7 +96,7 @@
             <div id="episode-diagnostics" class="metric-table"></div>
           </article>
           <article>
-            <div class="panel-title"><h3>Action distribution</h3><span>By seat</span></div>
+            <div class="panel-title"><h3>Action distribution</h3><span>By agent</span></div>
             <div id="action-bars" class="bars"></div>
           </article>
         </div>
@@ -130,6 +131,10 @@
               League re-roll (K)
               <input name="league_reroll_interval" type="number" min="0" value="0">
             </label>
+            <label title="Chip buy-in at the start of each cash-session episode">
+              Starting stack
+              <input name="starting_stack" type="number" min="1" step="1" value="50">
+            </label>
             <label>Checkpoint interval<input name="checkpoint_interval" type="number" min="1" value="100"></label>
             <label>Agent memory<input name="agent_memory_size" type="number" min="0" value="100"></label>
             <label>CPU cores<input name="cpus" type="number" min="1" value="1"></label>
@@ -141,6 +146,8 @@
             Seat source <strong>League (random)</strong> draws from active League members.
             Re-roll K=0 keeps that draw for the whole run; K&gt;0 swaps every K episodes.
             Update interval N buffers episodes and trains on all of them together.
+            Starting stack is the chip buy-in for each seat at the start of a session episode
+            (play continues until someone goes bust).
           </p>
           <button type="submit" class="primary">Submit campaign</button>
           <p id="campaign-message" class="message"></p>
@@ -312,6 +319,6 @@
     </section>
   </main>
 
-  <script src="static/app.js"></script>
+  <script src="static/app.js?v=chart-warmup-1"></script>
 </body>
 </html>

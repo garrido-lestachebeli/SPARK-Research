@@ -62,6 +62,7 @@ class CampaignRequest(BaseModel):
     checkpoint_interval: int = Field(default=100, ge=1)
     update_interval: int = Field(default=1, ge=1)
     league_reroll_interval: int = Field(default=0, ge=0)
+    starting_stack: float = Field(default=50.0, ge=1)
     partition: str | None = None
     cpus: int = Field(default=1, ge=1, le=256)
     memory: str = "4G"

@@ -3,6 +3,9 @@ import json
 import pytest
 
 from spark.environments import create_environment, list_environments
+from spark.environments.leduc import LeducAdapter
+from spark.environments.limit_holdem import LimitHoldemAdapter
+from spark.environments.no_limit_holdem import NoLimitHoldemAdapter
 
 
 def test_registry_exposes_supported_and_future_environments():
@@ -16,32 +19,62 @@ def test_registry_exposes_supported_and_future_environments():
 
 
 @pytest.mark.parametrize(
-    "environment_id",
-    ["leduc-holdem", "limit-holdem", "no-limit-holdem"],
+    "factory",
+    [LeducAdapter, LimitHoldemAdapter, NoLimitHoldemAdapter],
 )
-def test_adapter_separates_visible_and_hidden_state(environment_id):
-    environment = create_environment(environment_id)
+def test_adapter_separates_visible_and_hidden_state(factory):
+    environment = factory(2, starting_stack=6, max_hands=50)
     decision = environment.reset(42)
     hidden = environment.hidden_state()
 
     assert decision.legal_actions
     assert "encoded" in decision.observation
+    assert "stacks" in decision.observation
+    assert "hand_index" in decision.observation
     assert "hand_cards" not in decision.observation
     assert len(hidden["hand_cards"]) == 2
+    assert "stacks" in hidden
     json.dumps(hidden)
 
+    hands = {decision.observation["hand_index"]}
     while decision is not None:
+        hands.add(decision.observation.get("hand_index", 0))
         decision = environment.step(decision.legal_actions[0])
 
-    assert len(environment.payoffs()) == 2
+    payoffs = environment.payoffs()
+    assert len(payoffs) == 2
+    assert abs(sum(payoffs)) < 1e-6
+    assert environment.done
+    # Session play: either multiple hands or a single hand that busts someone.
+    assert min(environment._stacks) < environment._big_blind or len(hands) >= 1
+
+
+def test_leduc_episode_continues_across_hands_until_bust():
+    environment = LeducAdapter(2, starting_stack=8, max_hands=200)
+    decision = environment.reset(3)
+    hands = set()
+    steps = 0
+    while decision is not None:
+        hands.add(int(decision.observation["hand_index"]))
+        decision = environment.step(decision.legal_actions[0])
+        steps += 1
+        assert steps < 20_000
+    assert environment.done
+    assert any(stack < environment._big_blind for stack in environment._stacks)
+    assert abs(sum(environment.payoffs())) < 1e-6
+    assert max(hands) >= 0
 
 
 @pytest.mark.parametrize(
-    ("environment_id", "table_size"),
-    [("limit-holdem", 3), ("limit-holdem", 6), ("no-limit-holdem", 4)],
+    ("factory", "table_size"),
+    [
+        (LimitHoldemAdapter, 3),
+        (LimitHoldemAdapter, 6),
+        (NoLimitHoldemAdapter, 4),
+    ],
 )
-def test_holdem_adapters_complete_multiplayer_games(environment_id, table_size):
-    environment = create_environment(environment_id, table_size)
+def test_holdem_adapters_complete_multiplayer_games(factory, table_size):
+    environment = factory(table_size, starting_stack=6, max_hands=80)
     decision = environment.reset(7)
     while decision is not None:
         decision = environment.step(decision.legal_actions[0])

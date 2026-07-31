@@ -30,6 +30,25 @@ class LeducQAgent(Agent):
         """Convert the environment's encoded observation into a hashable state."""
         return tuple(float(value) for value in observation.get("encoded", []))
 
+    def action_probs(
+        self,
+        observation: dict[str, Any],
+        legal_actions: list[int],
+    ) -> dict[int, float]:
+        """ε-greedy mixture while training; greedy one-hot while evaluating."""
+        if not legal_actions:
+            raise ValueError("Agent received no legal actions.")
+        values = self.q[self.encode(observation)]
+        greedy = max(legal_actions, key=lambda action: values[action])
+        if not self.training or self.epsilon <= 0.0:
+            return self._one_hot_action_probs(legal_actions, greedy)
+        explore = self.epsilon / len(legal_actions)
+        exploit = 1.0 - self.epsilon
+        return {
+            int(action): explore + (exploit if int(action) == int(greedy) else 0.0)
+            for action in legal_actions
+        }
+
     def select_action(
         self,
         observation: dict[str, Any],
@@ -39,10 +58,9 @@ class LeducQAgent(Agent):
         del player_id
         if not legal_actions:
             raise ValueError("Agent received no legal actions.")
-        state = self.encode(observation)
         if self.training and self._random.random() < self.epsilon:
             return self._random.choice(legal_actions)
-        values = self.q[state]
+        values = self.q[self.encode(observation)]
         return max(legal_actions, key=lambda action: values[action])
 
     def update(self, episode: Episode) -> dict[str, float]:

@@ -8,6 +8,8 @@ const state = {
   selectedLeagueMember: null,
   runs: [],
   selectedRun: null,
+  selectedOverviewSeat: null,
+  overviewStats: null,
   selectedEpisode: null,
   episodes: [],
   episode: null,
@@ -133,6 +135,7 @@ async function loadRuns() {
     if (!selectionExists) {
       state.selectedRun = state.runs[0].id;
       state.selectedEpisode = null;
+      state.selectedOverviewSeat = null;
     }
     $("#run-select").value = state.selectedRun;
     $("#replay-run-select").value = state.selectedRun;
@@ -191,25 +194,41 @@ function updateRunEnvironmentLabels() {
 async function loadStatistics() {
   if (!state.selectedRun) return;
   const stats = await api(`/api/runs/${encodeURIComponent(state.selectedRun)}/statistics`);
-  const seatZero = stats.seat_payoffs?.["0"] || {};
-  const recent = stats.recent_seat_payoffs?.["0"] || {};
-  const winRate = stats.seat_outcomes?.["0"]?.win_rate || {};
+  state.overviewStats = stats;
+  const available = new Set((stats.seats || []).map((seat) => String(seat.seat)));
+  if (state.selectedOverviewSeat == null || !available.has(String(state.selectedOverviewSeat))) {
+    state.selectedOverviewSeat = String(stats.focus_seat ?? "0");
+  }
+  renderOverviewStats();
+}
+
+function renderOverviewStats() {
+  const stats = state.overviewStats;
+  if (!stats) return;
+  const focusSeat = String(state.selectedOverviewSeat ?? stats.focus_seat ?? "0");
+  const focus = seatInfo(stats, focusSeat);
+  const seatStats = stats.seat_payoffs?.[focusSeat] || {};
+  const recent = stats.recent_seat_payoffs?.[focusSeat] || {};
+  const winRate = stats.seat_outcomes?.[focusSeat]?.win_rate || {};
+  renderSeatLineup(stats.seats || [], focusSeat);
+  $("#payoff-chart-title").textContent =
+    `${focus.short_label} payoff over training`;
   $("#stat-cards").innerHTML = [
     [
-      `Recent payoff`,
+      "Recent payoff",
       formatSigned(recent.mean),
-      formatCi(recent.ci_low, recent.ci_high),
+      `${focus.label} · ${formatCi(recent.ci_low, recent.ci_high)}`,
       "primary",
     ],
     [
       "Overall payoff",
-      formatSigned(seatZero.mean),
-      formatCi(seatZero.ci_low, seatZero.ci_high),
+      formatSigned(seatStats.mean),
+      `${focus.label} · ${formatCi(seatStats.ci_low, seatStats.ci_high)}`,
     ],
     [
       "Win rate",
       formatPercent(winRate.rate),
-      formatCi(winRate.ci_low, winRate.ci_high, true),
+      `${focus.label} · ${formatCi(winRate.ci_low, winRate.ci_high, true)}`,
     ],
     ["Episodes", formatNumber(stats.episodes), `agent version ${stats.latest_agent_version}`],
     ["Training pace", `${formatNumber(stats.episodes_per_second, 1)} ep/s`, `${formatNumber(stats.total_duration, 1)}s observed`],
@@ -221,12 +240,57 @@ async function loadStatistics() {
     </article>
   `).join("");
   $("#trend-window").textContent =
-    `Rolling window: up to ${stats.rolling_window || 100} episodes`;
-  drawPayoffChart(stats.rolling || []);
-  renderPayoffSummary(stats);
-  renderActions(stats.actions || []);
-  renderOutcomes(stats.seat_outcomes || stats.outcomes || {});
-  renderEpisodeDiagnostics(stats);
+    `Rolling mean of ${stats.rolling_window || 100} (full window only) · viewing ${focus.short_label}`;
+  drawPayoffChart(stats.rolling || [], focusSeat);
+  renderPayoffSummary(stats, focusSeat);
+  renderActions(stats.actions || [], stats, focusSeat);
+  renderOutcomes(stats.seat_outcomes || stats.outcomes || {}, stats, focusSeat);
+  renderEpisodeDiagnostics(stats, focusSeat);
+}
+
+function seatInfo(stats, seat) {
+  const key = String(seat);
+  const fromStats = (stats?.seats || []).find((item) => String(item.seat) === key);
+  if (fromStats) return fromStats;
+  return {
+    seat: Number(seat),
+    label: `Seat ${seat}`,
+    short_label: `Seat ${seat}`,
+    detail: "",
+    agent_name: `Seat ${seat}`,
+    display_name: `Seat ${seat}`,
+  };
+}
+
+function selectOverviewSeat(seat) {
+  state.selectedOverviewSeat = String(seat);
+  renderOverviewStats();
+}
+
+function renderSeatLineup(seats, focusSeat = "0") {
+  const container = $("#seat-lineup");
+  if (!container) return;
+  if (!seats.length) {
+    container.innerHTML = "";
+    return;
+  }
+  const focusKey = String(focusSeat);
+  container.innerHTML = seats.map((seat) => {
+    const name = seat.display_name || seat.short_label || seat.agent_name;
+    const isFocus = String(seat.seat) === focusKey;
+    return `
+    <button type="button" class="seat-chip ${isFocus ? "focus" : ""}"
+      data-seat="${escapeHtml(String(seat.seat))}"
+      aria-pressed="${isFocus ? "true" : "false"}"
+      title="Show statistics for ${escapeHtml(name)}">
+      <strong>${escapeHtml(name)}</strong>
+      <small>Seat ${escapeHtml(String(seat.seat))} · ${escapeHtml(seat.detail || seat.mode || "")}</small>
+    </button>
+  `;
+  }).join("");
+  container.querySelectorAll(".seat-chip").forEach((button) => {
+    button.addEventListener("click", () => selectOverviewSeat(button.dataset.seat));
+  });
 }
 
 function formatNumber(value, digits = 0) {
@@ -260,14 +324,38 @@ function formatCi(low, high, percent = false) {
 }
 
 function renderEmptyStats() {
+  state.overviewStats = null;
+  state.selectedOverviewSeat = null;
   $("#stat-cards").innerHTML = '<article class="stat"><span>No training runs found</span><strong>—</strong></article>';
+  const lineup = $("#seat-lineup");
+  if (lineup) lineup.innerHTML = "";
+  const title = $("#payoff-chart-title");
+  if (title) title.textContent = "Payoff over training";
   $("#payoff-summary").innerHTML = "";
   $("#episode-diagnostics").innerHTML = "";
   $("#action-bars").innerHTML = "";
   $("#outcome-grid").innerHTML = "";
 }
 
-function drawPayoffChart(points) {
+function rollingValuesForSeat(point, seat) {
+  const key = String(seat);
+  const nested = point.seats?.[key];
+  if (nested) {
+    return {
+      average: nested.average_payoff,
+      cumulative: nested.cumulative_average ?? nested.average_payoff,
+    };
+  }
+  if (key === "0") {
+    return {
+      average: point.seat_0_average_payoff,
+      cumulative: point.seat_0_cumulative_average ?? point.seat_0_average_payoff,
+    };
+  }
+  return { average: 0, cumulative: 0 };
+}
+
+function drawPayoffChart(points, seat = "0") {
   const canvas = $("#payoff-chart");
   const context = canvas.getContext("2d");
   const width = canvas.width;
@@ -280,20 +368,29 @@ function drawPayoffChart(points) {
     context.beginPath(); context.moveTo(0, y); context.lineTo(width, y); context.stroke();
   }
   if (!points.length) return;
-  const values = points.flatMap((point) => [
-    point.seat_0_average_payoff,
-    point.seat_0_cumulative_average ?? point.seat_0_average_payoff,
-  ]);
+  // Skip partial rolling windows (episodes 1..W-1). Those are means of 1, 2, …
+  // games, not a true W-game average, and they dominate the Y-axis as a fake spike.
+  const windowSize = Number(state.overviewStats?.rolling_window || 100);
+  const warmup = Math.min(Math.max(windowSize - 1, 0), Math.max(points.length - 1, 0));
+  const usable = points.slice(warmup);
+  if (!usable.length) return;
+  const series = usable.map((point) => rollingValuesForSeat(point, seat));
+  const values = series
+    .flatMap((point) => [point.average, point.cumulative])
+    .filter((value) => Number.isFinite(value));
+  if (!values.length) return;
   const minimum = Math.min(...values, -1);
   const maximum = Math.max(...values, 1);
-  const yAt = (value) => height - ((value - minimum) / (maximum - minimum)) * height;
-  const xAt = (index) => (points.length === 1 ? width / 2 : index / (points.length - 1) * width);
+  const span = maximum - minimum || 1;
+  const yAt = (value) => height - ((value - minimum) / span) * height;
+  const xAt = (index) => (series.length === 1 ? width / 2 : index / (series.length - 1) * width);
 
   context.strokeStyle = "#67a8ff";
   context.lineWidth = 2;
   context.beginPath();
-  points.forEach((point, index) => {
-    const y = yAt(point.seat_0_cumulative_average ?? point.seat_0_average_payoff);
+  series.forEach((point, index) => {
+    if (!Number.isFinite(point.cumulative)) return;
+    const y = yAt(point.cumulative);
     if (index === 0) context.moveTo(xAt(index), y); else context.lineTo(xAt(index), y);
   });
   context.stroke();
@@ -301,22 +398,34 @@ function drawPayoffChart(points) {
   context.strokeStyle = "#55d6be";
   context.lineWidth = 3;
   context.beginPath();
-  points.forEach((point, index) => {
-    const y = yAt(point.seat_0_average_payoff);
-    if (index === 0) context.moveTo(xAt(index), y); else context.lineTo(xAt(index), y);
+  let started = false;
+  series.forEach((point, index) => {
+    if (!Number.isFinite(point.average)) return;
+    const y = yAt(point.average);
+    if (!started) {
+      context.moveTo(xAt(index), y);
+      started = true;
+    } else {
+      context.lineTo(xAt(index), y);
+    }
   });
   context.stroke();
 }
 
-function renderPayoffSummary(stats) {
+function renderPayoffSummary(stats, focusSeat = "0") {
   const seats = Object.keys(stats.seat_payoffs || stats.seat_average_payoffs || {});
+  const focusKey = String(focusSeat);
   $("#payoff-summary").innerHTML = seats.map((seat) => {
+    const info = seatInfo(stats, seat);
     const overall = stats.seat_payoffs?.[seat] || {};
     const recent = stats.recent_seat_payoffs?.[seat] || {};
+    const name = info.display_name || info.short_label;
+    const selected = String(seat) === focusKey;
     return `
-      <div class="metric-row">
+      <div class="metric-row ${selected ? "selected-seat" : ""}">
         <div>
-          <strong>Seat ${seat}</strong>
+          <strong>${escapeHtml(name)}${selected ? " · viewing" : ""}</strong>
+          <span class="seat-meta">Seat ${escapeHtml(String(info.seat))} · ${escapeHtml(info.detail || "")}</span>
           <span>Overall mean ${formatSigned(overall.mean)}</span>
           <span>${formatCi(overall.ci_low, overall.ci_high)}</span>
         </div>
@@ -337,28 +446,44 @@ function renderPayoffSummary(stats) {
   }).join("") || "<p>No payoffs recorded.</p>";
 }
 
-function renderActions(actions) {
-  const maximum = Math.max(...actions.map((item) => item.count), 1);
-  $("#action-bars").innerHTML = actions.map((item) => `
+function renderActions(actions, stats = {}, focusSeat = null) {
+  const focusKey = focusSeat == null ? null : String(focusSeat);
+  const filtered = focusKey == null
+    ? actions
+    : actions.filter((item) => String(item.player_id) === focusKey);
+  const maximum = Math.max(...filtered.map((item) => item.count), 1);
+  $("#action-bars").innerHTML = filtered.map((item) => {
+    const info = seatInfo(stats, item.player_id);
+    const name = info.display_name || info.short_label;
+    return `
     <div class="bar-row">
-      <span>P${item.player_id} ${item.action}</span>
+      <span title="${escapeHtml(info.label)}">${escapeHtml(name)} · ${escapeHtml(item.action)}</span>
       <div class="bar-track">
         <div class="bar-fill" style="width:${item.count / maximum * 100}%"></div>
       </div>
       <strong>${formatPercent(item.frequency ?? 0)}</strong>
     </div>
-  `).join("") || "<p>No actions recorded.</p>";
+  `;
+  }).join("") || "<p>No actions recorded for this seat.</p>";
 }
 
-function renderOutcomes(outcomes) {
+function renderOutcomes(outcomes, stats = {}, focusSeat = "0") {
+  const focusKey = String(focusSeat);
   $("#outcome-grid").innerHTML = Object.entries(outcomes).map(([seat, data]) => {
+    const info = seatInfo(stats, seat);
+    const name = info.display_name || info.short_label;
+    const selected = String(seat) === focusKey;
     const counts = data.win != null && data.win_rate
       ? data
       : { win: data.win || 0, loss: data.loss || 0, draw: data.draw || 0, win_rate: {}, draw_rate: {} };
     const winRate = counts.win_rate || {};
     return `
-      <div class="outcome-seat">
-        <strong><span>Player ${seat}</span><span>${counts.win || 0} W · ${counts.loss || 0} L · ${counts.draw || 0} D</span></strong>
+      <div class="outcome-seat ${selected ? "selected-seat" : ""}">
+        <strong>
+          <span>${escapeHtml(name)}${selected ? " · viewing" : ""}</span>
+          <span>${counts.win || 0} W · ${counts.loss || 0} L · ${counts.draw || 0} D</span>
+        </strong>
+        <span class="seat-meta">Seat ${escapeHtml(String(info.seat))} · ${escapeHtml(info.detail || "")}</span>
         <span>Win rate ${formatPercent(winRate.rate)} · ${formatCi(winRate.ci_low, winRate.ci_high, true)}</span>
         <details class="metric-details">
           <summary>More outcome rates</summary>
@@ -370,9 +495,11 @@ function renderOutcomes(outcomes) {
   }).join("") || "<p>No outcomes recorded.</p>";
 }
 
-function renderEpisodeDiagnostics(stats) {
+function renderEpisodeDiagnostics(stats, focusSeat = "0") {
   const length = stats.episode_length || {};
   const duration = stats.episode_duration || {};
+  const focus = seatInfo(stats, focusSeat);
+  const focusKey = String(focusSeat);
   $("#episode-diagnostics").innerHTML = `
     <div class="metric-row">
       <div>
@@ -388,9 +515,9 @@ function renderEpisodeDiagnostics(stats) {
     </div>
     <div class="metric-row">
       <div>
-        <strong>Payoff variability</strong>
-        <span>std dev ${formatNumber(stats.seat_payoffs?.["0"]?.std, 3)}</span>
-        <span>std error ${formatNumber(stats.seat_payoffs?.["0"]?.stderr, 3)}</span>
+        <strong>Payoff variability · ${escapeHtml(focus.short_label)}</strong>
+        <span>std dev ${formatNumber(stats.seat_payoffs?.[focusKey]?.std, 3)}</span>
+        <span>std error ${formatNumber(stats.seat_payoffs?.[focusKey]?.stderr, 3)}</span>
       </div>
       <div>
         <strong>Throughput</strong>
@@ -1118,6 +1245,7 @@ async function submitCampaign(event) {
     checkpoint_interval: Number(form.get("checkpoint_interval")),
     update_interval: Number(form.get("update_interval") || 1),
     league_reroll_interval: Number(form.get("league_reroll_interval") || 0),
+    starting_stack: Number(form.get("starting_stack") || 50),
     agent_memory_size: Number(form.get("agent_memory_size")),
     cpus: Number(form.get("cpus")),
     memory: form.get("memory"),
@@ -1230,6 +1358,7 @@ document.querySelectorAll(".tabs button").forEach((button) =>
 $("#run-select").addEventListener("change", async (event) => {
   state.selectedRun = event.target.value;
   state.selectedEpisode = null;
+  state.selectedOverviewSeat = null;
   $("#replay-run-select").value = state.selectedRun;
   updateRunEnvironmentLabels();
   await Promise.all([loadStatistics(), loadEpisodes()]);
@@ -1237,6 +1366,7 @@ $("#run-select").addEventListener("change", async (event) => {
 $("#replay-run-select").addEventListener("change", async (event) => {
   state.selectedRun = event.target.value;
   state.selectedEpisode = null;
+  state.selectedOverviewSeat = null;
   $("#run-select").value = state.selectedRun;
   updateRunEnvironmentLabels();
   await Promise.all([loadStatistics(), loadEpisodes()]);

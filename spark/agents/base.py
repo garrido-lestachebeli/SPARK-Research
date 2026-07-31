@@ -46,6 +46,19 @@ class Agent(ABC):
             raise ValueError("Agent received no legal actions.")
         return self._random.choice(legal_actions)
 
+    def action_probs(
+        self,
+        observation: dict[str, Any],
+        legal_actions: list[int],
+    ) -> dict[int, float]:
+        """Return π(a | observation) over currently legal actions.
+
+        Returns a dict mapping each legal action id to a probability. Values are
+        non-negative and sum to 1.0. The default policy is uniform.
+        """
+        del observation
+        return self._uniform_action_probs(legal_actions)
+
     def select_action(
         self,
         observation: dict[str, Any],
@@ -53,6 +66,29 @@ class Agent(ABC):
         player_id: int,
     ) -> int:
         return self.pi(observation, legal_actions, player_id)
+
+    @staticmethod
+    def _uniform_action_probs(legal_actions: list[int]) -> dict[int, float]:
+        if not legal_actions:
+            raise ValueError("Agent received no legal actions.")
+        mass = 1.0 / len(legal_actions)
+        return {int(action): mass for action in legal_actions}
+
+    @staticmethod
+    def _one_hot_action_probs(
+        legal_actions: list[int],
+        chosen: int,
+    ) -> dict[int, float]:
+        if not legal_actions:
+            raise ValueError("Agent received no legal actions.")
+        if chosen not in legal_actions:
+            raise ValueError(
+                f"Chosen action {chosen} is not among legal actions {legal_actions}."
+            )
+        return {
+            int(action): (1.0 if int(action) == int(chosen) else 0.0)
+            for action in legal_actions
+        }
 
     def update(self, episode: Episode) -> dict[str, float]:
         """Remember a completed episode; learning algorithms can override this hook."""
