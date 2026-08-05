@@ -29,10 +29,28 @@ class Agent(ABC):
         self.episodes_seen = 0
         self.training = bool(self.config.get("training", True))
         self._random = random.Random(self.seed)
+        # Runtime-only reference for querying another seat's policy (not checkpointed).
+        self.opponent: Agent | None = None
 
     def set_training(self, enabled: bool) -> None:
         """Switch between learning/exploration and frozen evaluation."""
         self.training = bool(enabled)
+
+    def set_opponent(self, opponent: Agent | None) -> None:
+        """Attach another seat's agent so this one can query its policy.
+
+        Used for Bayesian hidden-state inference: call
+        ``self.opponent.action_probs(obs, legal)`` to get π(a | info state)
+        under hypothesized opponent hole cards.
+
+        Args:
+            opponent: The other seat's ``Agent`` instance, or ``None`` to clear.
+
+        Notes:
+            Runtime-only. Not written to ``state_dict`` / checkpoints. The trainer
+            calls this automatically via ``_wire_opponents``.
+        """
+        self.opponent = opponent
 
     def pi(
         self,

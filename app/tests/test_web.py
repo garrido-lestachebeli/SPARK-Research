@@ -27,6 +27,8 @@ def test_dashboard_serves_statistics_and_full_replay(tmp_path, monkeypatch):
     assert page.status_code == 200
     assert 'id="performance-interpretation"' not in page.text
     assert 'id="run-environment"' in page.text
+    assert 'id="pot-display"' in page.text
+    assert 'id="public-cards"' in page.text
     assert "Advanced diagnostics" in page.text
     assert 'id="save-agent-form"' in page.text
     assert 'data-tab="league"' in page.text

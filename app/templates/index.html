@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>SPARK Training Console</title>
   <!-- Relative paths so Open OnDemand /rnode and /node proxies work. -->
-  <link rel="stylesheet" href="static/style.css?v=chart-warmup-1">
+  <link rel="stylesheet" href="static/style.css?v=replay-cards-1">
 </head>
 <body>
   <header class="topbar">
@@ -291,11 +291,19 @@
       </div>
       <div class="replay-layout">
         <article class="panel poker-table">
-          <div id="replay-players" class="replay-players"></div>
-          <div class="board">
-            <span>Public cards</span>
-            <strong id="public-cards">—</strong>
-            <small id="pot-state"></small>
+          <div class="table-felt">
+            <div id="replay-players" class="replay-players"></div>
+            <div class="table-center">
+              <div id="pot-display" class="pot-display">
+                <span class="pot-label">Pot</span>
+                <strong id="pot-amount">—</strong>
+              </div>
+              <div class="board">
+                <span>Community</span>
+                <div id="public-cards" class="card-row" aria-label="Public cards"></div>
+              </div>
+              <small id="hand-meta" class="hand-meta"></small>
+            </div>
           </div>
           <div id="action-banner" class="action-banner">Select an episode</div>
         </article>
@@ -319,6 +327,6 @@
     </section>
   </main>
 
-  <script src="static/app.js?v=chart-warmup-1"></script>
+  <script src="static/app.js?v=replay-cards-1"></script>
 </body>
 </html>

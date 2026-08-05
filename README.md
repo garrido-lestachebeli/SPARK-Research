@@ -296,12 +296,24 @@ Same player-visible dict the environment already builds (`decision.observation` 
 ```
 
 `action_probs` does **not** loop over possible hole cards. Each call assumes one
-info state already encoded in `observation`. The Bayes loop (still to build)
-calls it once per hypothesized card after constructing a matching `obs_c`.
+info state already encoded in `observation`. The Bayes loop calls it once per
+hypothesized card after constructing a matching `obs_c`.
+
+### Opponent wiring and per-card likelihood scaffold
+
+- `Agent.set_opponent(other)` stores a runtime reference to another seat (not saved
+  in checkpoints). The trainer wires seats automatically after create, league
+  re-roll, and checkpoint load (2-player tables point at each other).
+- `LeducQAgent` calls `_query_opponent_action_probs` at the start of
+  `select_action`, builds one hypothetical opponent observation per remaining
+  hole card (5 preflop / 4 postflop), and stores:
+
+```python
+agent.opponent_action_probs_by_card  # dict[card_id, dict[action_id, float]]
+```
 
 **Still to implement**
 
-- Prior / posterior belief over opponent cards
-- Constructing hypothetical opponent observations for each card hypothesis
-- A Bayes agent that updates on opponent actions and uses the belief to act
+- Prior / posterior belief over opponent cards (Bayes update using the scaffold)
+- A Bayes agent that uses the belief to act
 

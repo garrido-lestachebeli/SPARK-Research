@@ -1319,32 +1319,125 @@ function renderReplay() {
     : `Initial deal · seed ${episode.seed}`;
 
   const hidden = frame.hidden || {};
+  const visible = frame.visible || {};
   const hands = hidden.hand_cards || hidden.hands || [];
+  const stacks = hidden.stacks || visible.stacks || [];
+  const committed = hidden.chips || visible.raw?.all_chips || [];
   const playerCount = Math.max(
     hands.length,
+    stacks.length,
+    committed.length,
     episode.payoffs?.length || 0,
-    frame.raw?.player_id + 1 || 0,
+    (frame.raw?.player_id ?? -1) + 1,
   );
+  const pot = committed.reduce((sum, value) => sum + Number(value || 0), 0);
+  $("#pot-amount").textContent = committed.length ? formatChips(pot) : "—";
+  const metaBits = [];
+  if (hidden.hand_index != null) metaBits.push(`Hand ${Number(hidden.hand_index) + 1}`);
+  if (hidden.starting_stack != null) metaBits.push(`Buy-in ${formatChips(hidden.starting_stack)}`);
+  if (hidden.big_blind != null) metaBits.push(`BB ${formatChips(hidden.big_blind)}`);
+  $("#hand-meta").textContent = metaBits.join(" · ");
+
   $("#replay-players").innerHTML = Array.from(
     { length: playerCount },
-    (_, playerId) => `
-      <div class="player-card ${playerId === frame.raw?.player_id ? "active" : ""}">
-        <span>Player ${playerId} hidden hand</span>
-        <strong>${escapeHtml(formatCards(hands[playerId]))}</strong>
-      </div>
-    `,
+    (_, playerId) => {
+      const active = playerId === frame.raw?.player_id;
+      const stackValue = stacks[playerId];
+      const inPot = committed[playerId];
+      return `
+        <div class="player-seat ${active ? "active" : ""}">
+          <span class="seat-label">Player ${playerId}${active ? " · acting" : ""}</span>
+          <div class="card-row">${renderCardsHtml(hands[playerId])}</div>
+          <div class="chip-pile" title="Remaining stack">
+            <span class="chip-token" aria-hidden="true"></span>
+            <span>Stack ${stackValue == null ? "—" : formatChips(stackValue)}</span>
+          </div>
+          <div class="chip-pile committed" title="Chips committed this hand">
+            <span class="chip-token" aria-hidden="true"></span>
+            <span>In pot ${inPot == null ? "—" : formatChips(inPot)}</span>
+          </div>
+        </div>
+      `;
+    },
   ).join("");
-  $("#public-cards").textContent = formatCards(hidden.public_cards || hidden.public_card);
-  const chips = hidden.chips || frame.visible?.raw?.all_chips || [];
-  $("#pot-state").textContent = chips.length ? `Committed chips: ${chips.join(" / ")}` : "";
+
+  const publicCards = normalizeCardList(hidden.public_cards ?? hidden.public_card);
+  $("#public-cards").innerHTML = publicCards.length
+    ? publicCards.map(renderCardHtml).join("")
+    : '<span class="card-empty">No community cards</span>';
+
   if (state.step === episode.steps.length) {
     $("#action-banner").textContent += ` · Final payoffs: ${episode.payoffs.join(" / ")}`;
   }
 }
 
+function formatChips(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return String(value);
+  return Number.isInteger(number) ? String(number) : number.toFixed(1);
+}
+
+function normalizeCardList(value) {
+  if (value == null || value === "") return [];
+  if (Array.isArray(value)) {
+    return value.flatMap((item) => normalizeCardList(item));
+  }
+  const text = String(value).trim();
+  if (!text || text.toLowerCase() === "none" || text.toLowerCase() === "null") return [];
+  // Allow "HK SJ" style strings as well as single codes like "HK".
+  if (text.includes(" ") || text.includes(",")) {
+    return text.split(/[\s,]+/).filter(Boolean);
+  }
+  return [text];
+}
+
+function parseCardCode(code) {
+  const raw = String(code || "").trim().toUpperCase();
+  if (!raw) return null;
+  // RLCard style: suit then rank, e.g. HK, SJ, CT, S10
+  let match = raw.match(/^([SHDC])([A23456789TJQK]|10)$/);
+  if (match) {
+    return { suit: match[1], rank: match[2] === "T" ? "10" : match[2] };
+  }
+  // Rank then suit, e.g. KH, JS, 10S
+  match = raw.match(/^([A23456789TJQK]|10)([SHDC])$/);
+  if (match) {
+    return { suit: match[2], rank: match[1] === "T" ? "10" : match[1] };
+  }
+  return { suit: null, rank: raw };
+}
+
+function renderCardHtml(code) {
+  const parsed = parseCardCode(code);
+  if (!parsed) {
+    return '<span class="card-empty">—</span>';
+  }
+  const suitSymbols = { S: "♠", H: "♥", D: "♦", C: "♣" };
+  const suit = parsed.suit;
+  const symbol = suitSymbols[suit] || "";
+  const color = suit === "H" || suit === "D" ? "red" : "black";
+  if (!suit) {
+    return `<div class="playing-card black" title="${escapeHtml(String(code))}">
+      <span class="rank">${escapeHtml(parsed.rank)}</span>
+      <span class="suit-center">?</span>
+    </div>`;
+  }
+  return `<div class="playing-card ${color}" title="${escapeHtml(String(code))}">
+    <span class="rank">${escapeHtml(parsed.rank)}</span>
+    <span class="suit-corner">${symbol}</span>
+    <span class="suit-center">${symbol}</span>
+  </div>`;
+}
+
+function renderCardsHtml(value) {
+  const cards = normalizeCardList(value);
+  if (!cards.length) return '<span class="card-empty">—</span>';
+  return cards.map(renderCardHtml).join("");
+}
+
 function formatCards(value) {
-  if (!value || (Array.isArray(value) && !value.length)) return "—";
-  return Array.isArray(value) ? value.join("  ") : String(value);
+  const cards = normalizeCardList(value);
+  return cards.length ? cards.join("  ") : "—";
 }
 
 function moveStep(value) {

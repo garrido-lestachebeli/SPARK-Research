@@ -97,7 +97,29 @@ class Trainer:
                 )
             agent.set_training(seat_config["mode"] == "train")
             agents[seat] = agent
+        self.agents = agents
+        self._wire_opponents()
         return agents
+
+    def _wire_opponents(self) -> None:
+        """Point each seat at another seat so agents can query ``action_probs``.
+
+        Two-player tables (Leduc) wire seats to each other. Larger tables point
+        each seat at the next seat modulo n. Re-run after create, league re-roll,
+        and checkpoint load so references stay valid.
+        """
+        seats = sorted(self.agents)
+        if not seats:
+            return
+        if len(seats) == 2:
+            left, right = seats
+            self.agents[left].set_opponent(self.agents[right])
+            self.agents[right].set_opponent(self.agents[left])
+            return
+        count = len(seats)
+        for index, seat in enumerate(seats):
+            other = seats[(index + 1) % count]
+            self.agents[seat].set_opponent(self.agents[other])
 
     def _normalize_seat_configs(self) -> list[dict[str, Any]]:
         values = self.config.seat_configs
@@ -338,6 +360,7 @@ class Trainer:
                 f"Seat {seat} re-rolled to {member.get('name')} ({member_id}).",
             )
         if changed:
+            self._wire_opponents()
             self.save_checkpoint()
 
     def _persist_league_training_states(self) -> None:
@@ -464,6 +487,7 @@ class Trainer:
             agent.load_state_dict(state)
             agent.seat_id = seat
             agent.set_training(self.seat_configs[seat]["mode"] == "train")
+        self._wire_opponents()
         saved_config = dict(payload.get("config") or {})
         if "update_interval" in saved_config:
             self.config.update_interval = max(1, int(saved_config["update_interval"]))
