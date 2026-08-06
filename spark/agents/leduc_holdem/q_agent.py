@@ -510,7 +510,6 @@ class LeducQAgent(Agent):
 
     def update(self, episode: Episode) -> dict[str, float]:
         """Apply one-step Q updates between consecutive decisions by each seat."""
-        state = self.last_state
         td_errors: list[float] = []
         steps = [
             step for step in episode.steps if step.player_id == self.seat_id
