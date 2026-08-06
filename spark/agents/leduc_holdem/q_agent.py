@@ -21,6 +21,8 @@ import ast
 from collections import defaultdict
 from typing import Any
 
+#from sympy.stats.rv import probability
+
 from spark.agents.base import Agent
 from spark.models import Episode
 
@@ -57,13 +59,18 @@ class LeducQAgent(Agent):
         # TODO(bayes #1): Belief over opponent hole card, e.g. {"HK": 0.7, "SJ": 0.1, ...}
         #   - Must sum to 1.0 over remaining cards.
         #   - Reset each new hand (see on_episode_start / hand_index tracking).
-        # self.belief: dict[str, float] = {}
-        # self._belief_hand_index: int | None = None  # detect hand changes
+        self.belief: dict[str, float] = {}
 
-    @staticmethod
-    def encode(observation: dict[str, Any]) -> tuple[float, ...]:
+        self._belief_hand_index: int | None = None  # detect hand changes
+        self._last_belief_action_index: int | None = None
+
+    def encode(self, observation: dict[str, Any]) -> tuple[float, ...]:
         """Convert the environment's encoded observation into a hashable state."""
-        return tuple(float(value) for value in observation.get("encoded", []))
+        encoded = [float(value) for value in observation.get("encoded", [])]
+
+        for card in LEDUC_DECK:
+            encoded.append(self.belief.get(card, 0.0))
+        return tuple(encoded)
 
     def action_probs(
         self,
@@ -88,7 +95,7 @@ class LeducQAgent(Agent):
         """Reset episode-scoped state. Belief should be cleared / re-initialized here."""
         super().on_episode_start(episode_number)
         # TODO(bayes #2): Reset belief at episode start (and again when hand_index changes).
-        # self.belief = {}
+        self.belief = {}
         # self._belief_hand_index = None
 
     def select_action(
@@ -98,118 +105,243 @@ class LeducQAgent(Agent):
         player_id: int,
     ) -> int:
         """Choose an action; first refresh per-card opponent action probabilities."""
+
+        hand_index = observation.get("hand_index")
+
+        if hand_index != self._belief_hand_index:
+            self.belief = {}
+            self._last_belief_action_index = None
+            self._belief_hand_index = hand_index
+
         self._query_opponent_action_probs(observation, player_id)
 
         # ------------------------------------------------------------------
         # TODO(bayes #3): UPDATE BELIEF  —  P(card | opponent action)
         # ------------------------------------------------------------------
         # Call something like:
-        #   self._update_belief(observation, player_id)
+        self._update_belief(observation, player_id)
         # See stub ``_update_belief`` below for the math checklist.
-        #
         # ------------------------------------------------------------------
         # TODO(bayes #4): USE BELIEF TO CHOOSE AN ACTION
         # ------------------------------------------------------------------
         # Likelihoods alone do not pick a move. After belief is updated, score
         # each legal action under the belief, then pick (or ε-greedy on scores).
-        #
-        # Replace / wrap the plain Q greedy block below with something like:
-        #   return self._select_action_with_belief(observation, legal_actions)
-        # See stub ``_select_action_with_belief`` for decision options.
-        # ------------------------------------------------------------------
-
         if not legal_actions:
             raise ValueError("Agent received no legal actions.")
-        if self.training and self._random.random() < self.epsilon:
-            return self._random.choice(legal_actions)
-        values = self.q[self.encode(observation)]
-        return max(legal_actions, key=lambda action: values[action])
+
+        return self._select_action_with_belief(
+            observation,
+            legal_actions,
+        )
+
+    def _get_last_opponent_action(
+            self,
+            observation: dict[str, Any],
+            player_id: int,
+    ) -> tuple[int | None, int | None]:
+        """
+        Return:
+            (opponent_action_id, history_index)
+
+        Example:
+            (1, 4) means opponent raised at action_record[4].
+        """
+
+        history = observation.get("action_record") or []
+
+        if not history:
+            return None, None
+
+        opponent_id = (
+            int(self.opponent.seat_id)
+            if self.opponent is not None
+            else 1 - int(player_id)
+        )
+
+        name_to_id = {
+            name: action_id
+            for action_id, name in self.action_names.items()
+        }
+
+        for index in reversed(range(len(history))):
+            entry = history[index]
+
+            if not isinstance(entry, (list, tuple)):
+                continue
+
+            if len(entry) < 2:
+                continue
+
+            actor, action = entry[:2]
+
+            if int(actor) != opponent_id:
+                continue
+
+            if isinstance(action, str):
+                action_id = name_to_id.get(action)
+                if action_id is None:
+                    continue
+            else:
+                action_id = int(action)
+
+            return action_id, index
+
+        return None, None
 
     def _update_belief(
         self,
         observation: dict[str, Any],
         player_id: int,
     ) -> None:
-        """TODO(bayes #3 stub): Bayes-update ``self.belief`` from opponent actions.
-
-        After the opponent takes an action, revise how likely each possible
-        hole card is. Store the result in ``self.belief``:
-
-            self.belief[c] = P(opponent hole card == c | actions so far)
 
 
-        (1) PRIOR  P(c)  — belief before using this new action
-            - First decision of a hand (or empty belief):
-                  cards = self._remaining_opponent_cards(observation)
-                  # 5 cards preflop (deck 6 minus ours), 4 postflop
-                  # (also removes the public card when it exists)
-                  prior[c] = 1.0 / len(cards)   for each c in cards
-            - Later in the same hand:
-                  prior = self.belief from the previous update
-                  Drop any card no longer remaining (e.g. public just dealt),
-                  then renormalize so it still sums to 1.
+        # After the opponent takes an action, revise how likely each possible
+        # hole card is. Store the result in ``self.belief``:
+        #
+        #     self.belief[c] = P(opponent hole card == c | actions so far)
+        #
+        #
+        # (1) PRIOR  P(c)  — belief before using this new action
+        #     - First decision of a hand (or empty belief):
+        #         cards = self._remaining_opponent_cards(observation)
+        #           # 5 cards preflop (deck 6 minus ours), 4 postflop
+        #           # (also removes the public card when it exists)
+        #           prior[c] = 1.0 / len(cards)   for each c in cards
+        #     - Later in the same hand:
+        #           prior = self.belief from the previous update
+        #           Drop any card no longer remaining (e.g. public just dealt),
+        #           then renormalize so it still sums to 1.
+        #
+        # (2) LIKELIHOOD  P(a | c)  — "if they held c, how often would they do a?"
+        #     Already scaffolded (approximately) in:
+        #           self.opponent_action_probs_by_card[c][a]
+        #     That dict is filled by ``_query_opponent_action_probs``:
+        #     for each remaining card c it builds obs_c (opponent view with
+        #     hole = c) and calls ``self.opponent.action_probs(obs_c, legal)``.
+        #
+        #     Example shape after a query:
+        #           {
+        #             "SQ": {0: 0.70, 1: 0.10, 2: 0.20},   # call/raise/fold
+        #             "SK": {0: 0.10, 1: 0.80, 2: 0.10},
+        #             ...
+        #           }
+        #     So if they raised (a = 1):
+        #           L["SQ"] = 0.10
+        #           L["SK"] = 0.80
+        #
+        #     !! TIMING CAVEAT (important for correctness) !!
+        #     ``_query_opponent_action_probs`` currently runs at the *start of
+        #     OUR* ``select_action``, using today's betting context / legal set.
+        #     Strict Bayes needs P(a|c) from the info state the opponent faced
+        #     *when they took a*. Acceptable v1: use the current scaffold as an
+        #     approximation. Better v1.1: when processing action_record, rebuild
+        #     or cache probs for that historical decision point.
+        #
+        # (3) EVIDENCE  a  — the action they actually took
+        #     Read from observation["action_record"], a list like:
+        #           [(0, "raise"), (1, "call"), ...]
+        #     or (player_id, action_id). Normalize action names → ids with
+        #     action_names / inverse map (call=0, raise=1, fold=2, check=3).
+        #
+        #     Opponent seat is usually ``self.opponent.seat_id`` (or 1 - player_id).
+        #     Take the *most recent* entry where player == opponent.
+        #     If they have not acted yet this hand, there is nothing to update —
+        #     just install the prior into self.belief and return.
+        #
+        #
+        # - self.opponent                          other seat's Agent
+        # - self.opponent_action_probs_by_card     P(action | card) map
+        # - self._remaining_opponent_cards(...)    which cards are still possible
+        # - self._build_opponent_observation(...)  used inside the query helper
+        # - observation["raw"]["hand"]             our card (for the prior support)
+        # - observation["raw"]["public_card"]      None or card id
+        # - observation["action_record"]           history for evidence a
+        # - observation["hand_index"]              detect new hand within episode
 
-        (2) LIKELIHOOD  P(a | c)  — "if they held c, how often would they do a?"
-            Already scaffolded (approximately) in:
-                  self.opponent_action_probs_by_card[c][a]
-            That dict is filled by ``_query_opponent_action_probs``:
-            for each remaining card c it builds obs_c (opponent view with
-            hole = c) and calls ``self.opponent.action_probs(obs_c, legal)``.
+        action, action_index = self._get_last_opponent_action(
+            observation,
+            player_id,
+        )
 
-            Example shape after a query:
-                  {
-                    "SQ": {0: 0.70, 1: 0.10, 2: 0.20},   # call/raise/fold
-                    "SK": {0: 0.10, 1: 0.80, 2: 0.10},
-                    ...
-                  }
-            So if they raised (a = 1):
-                  L["SQ"] = 0.10
-                  L["SK"] = 0.80
+        # Already processed this action
+        if (
+                action_index is not None
+                and action_index == self._last_belief_action_index
+        ):
+            return
 
-            !! TIMING CAVEAT (important for correctness) !!
-            ``_query_opponent_action_probs`` currently runs at the *start of
-            OUR* ``select_action``, using today's betting context / legal set.
-            Strict Bayes needs P(a|c) from the info state the opponent faced
-            *when they took a*. Acceptable v1: use the current scaffold as an
-            approximation. Better v1.1: when processing action_record, rebuild
-            or cache probs for that historical decision point.
+        self._last_belief_action_index = action_index
 
-        (3) EVIDENCE  a  — the action they actually took
-            Read from observation["action_record"], a list like:
-                  [(0, "raise"), (1, "call"), ...]
-            or (player_id, action_id). Normalize action names → ids with
-            action_names / inverse map (call=0, raise=1, fold=2, check=3).
+        remaining_cards = self._remaining_opponent_cards(observation)
 
-            Opponent seat is usually ``self.opponent.seat_id`` (or 1 - player_id).
-            Take the *most recent* entry where player == opponent.
-            If they have not acted yet this hand, there is nothing to update —
-            just install the prior into self.belief and return.
+        if not remaining_cards:
+            self.belief = {}
+            return
 
+        # Prior
+        if not self.belief:
+            prior = {
+                card: 1.0 / len(remaining_cards)
+                for card in remaining_cards
+            }
+        else:
+            prior = {
+                card: self.belief.get(card, 0.0)
+                for card in remaining_cards
+            }
 
-        - self.opponent                          other seat's Agent
-        - self.opponent_action_probs_by_card     P(action | card) map
-        - self._remaining_opponent_cards(...)    which cards are still possible
-        - self._build_opponent_observation(...)  used inside the query helper
-        - observation["raw"]["hand"]             our card (for the prior support)
-        - observation["raw"]["public_card"]      None or card id
-        - observation["action_record"]           history for evidence a
-        - observation["hand_index"]              detect new hand within episode
-        """
-        del observation, player_id
-        raise NotImplementedError("TODO(bayes #3): implement belief update")
+            total = sum(prior.values())
+
+            if total > 0:
+                prior = {
+                    card: value / total
+                    for card, value in prior.items()
+                }
+
+        # No opponent action yet
+        if action is None:
+            self.belief = prior
+            return
+
+        # Bayes update:
+        # P(card | action) ∝ P(action | card) * P(card)
+        posterior = {}
+
+        for card in remaining_cards:
+            likelihood = (
+                self.opponent_action_probs_by_card
+                .get(card, {})
+                .get(action, 0.0)
+            )
+
+            posterior[card] = prior[card] * likelihood
+
+        total = sum(posterior.values())
+
+        if total > 0:
+            self.belief = {
+                card: value / total
+                for card, value in posterior.items()
+            }
+        else:
+            # Opponent model gave zero probability everywhere
+            self.belief = prior
 
     def _select_action_with_belief(
-        self,
-        observation: dict[str, Any],
-        legal_actions: list[int],
-    ) -> int:
-        """TODO(bayes #4 stub): Choose an action using ``self.belief``.
+            self,
+            observation,
+            legal_actions,
+    ):
 
-        Belief ``self.belief[c]`` = P(opponent holds c). It does not pick an
-        action by itself — weight how good each action is against each card.
-        """
-        del observation, legal_actions
-        raise NotImplementedError("TODO(bayes #4): implement belief-aware action selection")
+        if self.training and self._random.random() < self.epsilon:
+            return self._random.choice(legal_actions)
+
+        values = self.q[self.encode(observation)]
+
+        return max(
+            legal_actions,
+            key=lambda action: values[action],
+        )
 
     def _query_opponent_action_probs(
         self,
@@ -378,6 +510,7 @@ class LeducQAgent(Agent):
 
     def update(self, episode: Episode) -> dict[str, float]:
         """Apply one-step Q updates between consecutive decisions by each seat."""
+        state = self.last_state
         td_errors: list[float] = []
         steps = [
             step for step in episode.steps if step.player_id == self.seat_id
@@ -422,5 +555,7 @@ class LeducQAgent(Agent):
         self.gamma = float(state.get("gamma", self.gamma))
         self.epsilon = float(state.get("epsilon", self.epsilon))
         self.q.clear()
+        self.belief = {}
+        self._belief_hand_index = None
         for key, values in dict(state.get("q_table", {})).items():
             self.q[tuple(ast.literal_eval(key))] = [float(value) for value in values]
