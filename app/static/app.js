@@ -9,6 +9,7 @@ const state = {
   runs: [],
   selectedRun: null,
   selectedOverviewSeat: null,
+  selectedEvalOpponent: null,
   overviewStats: null,
   selectedEpisode: null,
   episodes: [],
@@ -17,6 +18,8 @@ const state = {
   playing: null,
   activeTab: "overview",
   draggedMember: null,
+  pollInFlight: false,
+  statsAbort: null,
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -60,7 +63,10 @@ async function api(path, options = {}) {
       : detail || `${response.status} ${response.statusText}`;
     throw new Error(message);
   }
-  return response.json();
+  // Some endpoints (DELETE) may return empty bodies.
+  if (response.status === 204) return null;
+  const text = await response.text();
+  return text ? JSON.parse(text) : null;
 }
 
 function setTab(name) {
@@ -126,7 +132,7 @@ function renderConfig(config) {
   }
 }
 
-async function loadRuns() {
+async function loadRuns({ refreshDetails = true } = {}) {
   state.runs = await api("/api/runs");
   renderRunSelect("#run-select");
   renderRunSelect("#replay-run-select");
@@ -136,11 +142,14 @@ async function loadRuns() {
       state.selectedRun = state.runs[0].id;
       state.selectedEpisode = null;
       state.selectedOverviewSeat = null;
+      state.selectedEvalOpponent = null;
     }
     $("#run-select").value = state.selectedRun;
     $("#replay-run-select").value = state.selectedRun;
     updateRunEnvironmentLabels();
-    await Promise.all([loadStatistics(), loadEpisodes()]);
+    if (refreshDetails) {
+      await Promise.all([loadStatistics(), loadEpisodes()]);
+    }
   } else {
     state.selectedRun = null;
     updateRunEnvironmentLabels();
@@ -193,13 +202,30 @@ function updateRunEnvironmentLabels() {
 
 async function loadStatistics() {
   if (!state.selectedRun) return;
-  const stats = await api(`/api/runs/${encodeURIComponent(state.selectedRun)}/statistics`);
-  state.overviewStats = stats;
-  const available = new Set((stats.seats || []).map((seat) => String(seat.seat)));
-  if (state.selectedOverviewSeat == null || !available.has(String(state.selectedOverviewSeat))) {
-    state.selectedOverviewSeat = String(stats.focus_seat ?? "0");
+  if (state.statsAbort) {
+    state.statsAbort.abort();
   }
-  renderOverviewStats();
+  const controller = new AbortController();
+  state.statsAbort = controller;
+  try {
+    const stats = await api(`/api/runs/${encodeURIComponent(state.selectedRun)}/statistics`, {
+      signal: controller.signal,
+    });
+    if (controller.signal.aborted) return;
+    state.overviewStats = stats;
+    const available = new Set((stats.seats || []).map((seat) => String(seat.seat)));
+    if (state.selectedOverviewSeat == null || !available.has(String(state.selectedOverviewSeat))) {
+      state.selectedOverviewSeat = String(stats.focus_seat ?? "0");
+    }
+    renderOverviewStats();
+  } catch (error) {
+    if (error.name === "AbortError") return;
+    throw error;
+  } finally {
+    if (state.statsAbort === controller) {
+      state.statsAbort = null;
+    }
+  }
 }
 
 function renderOverviewStats() {
@@ -242,6 +268,7 @@ function renderOverviewStats() {
   $("#trend-window").textContent =
     `Rolling mean of ${stats.rolling_window || 100} (full window only) · viewing ${focus.short_label}`;
   drawPayoffChart(stats.rolling || [], focusSeat);
+  renderEvaluation(stats.evaluation, focusSeat, focus);
   renderPayoffSummary(stats, focusSeat);
   renderActions(stats.actions || [], stats, focusSeat);
   renderOutcomes(stats.seat_outcomes || stats.outcomes || {}, stats, focusSeat);
@@ -326,11 +353,15 @@ function formatCi(low, high, percent = false) {
 function renderEmptyStats() {
   state.overviewStats = null;
   state.selectedOverviewSeat = null;
+  state.selectedEvalOpponent = null;
   $("#stat-cards").innerHTML = '<article class="stat"><span>No training runs found</span><strong>—</strong></article>';
   const lineup = $("#seat-lineup");
   if (lineup) lineup.innerHTML = "";
+  const evalLineup = $("#eval-opponent-lineup");
+  if (evalLineup) evalLineup.innerHTML = "";
   const title = $("#payoff-chart-title");
   if (title) title.textContent = "Payoff over training";
+  renderEvaluation(null, "0");
   $("#payoff-summary").innerHTML = "";
   $("#episode-diagnostics").innerHTML = "";
   $("#action-bars").innerHTML = "";
@@ -410,6 +441,265 @@ function drawPayoffChart(points, seat = "0") {
     }
   });
   context.stroke();
+}
+
+// Okabe-Ito qualitative palette: distinguishable under deuteranopia,
+// protanopia, and tritanopia. Opponents are also labelled on the x axis so
+// colour is never the only way to tell two boxes apart.
+const EVAL_PALETTE = [
+  "#0072B2",
+  "#E69F00",
+  "#009E73",
+  "#CC79A7",
+  "#56B4E9",
+  "#D55E00",
+  "#F0E442",
+  "#999999",
+];
+
+function evalStyle(index) {
+  return {
+    color: EVAL_PALETTE[index % EVAL_PALETTE.length],
+  };
+}
+
+function selectEvalOpponent(opponentId) {
+  state.selectedEvalOpponent = opponentId == null ? null : String(opponentId);
+  const stats = state.overviewStats;
+  if (!stats) return;
+  const focusSeat = String(state.selectedOverviewSeat ?? stats.focus_seat ?? "0");
+  renderEvaluation(stats.evaluation, focusSeat, seatInfo(stats, focusSeat));
+}
+
+function renderEvaluation(evaluation, focusSeat = "0", focus = null) {
+  const canvas = $("#eval-chart");
+  if (!canvas) return;
+  const seatData = evaluation?.seats?.[String(focusSeat)];
+  const rounds = seatData?.rounds || [];
+  const opponents = seatData?.opponents || [];
+  const name = focus?.short_label || `Seat ${focusSeat}`;
+  const title = $("#eval-chart-title");
+  if (title) title.textContent = `${name} test payoff by evaluation round`;
+
+  const availableIds = new Set(opponents.map((opponent) => String(opponent.opponent_member_id)));
+  if (state.selectedEvalOpponent == null || !availableIds.has(String(state.selectedEvalOpponent))) {
+    state.selectedEvalOpponent = opponents[0] ? String(opponents[0].opponent_member_id) : null;
+  }
+  const selectedId = state.selectedEvalOpponent;
+  const selectedIndex = opponents.findIndex(
+    (opponent) => String(opponent.opponent_member_id) === String(selectedId),
+  );
+  const selected = selectedIndex >= 0 ? opponents[selectedIndex] : null;
+
+  const subtitle = $("#eval-window");
+  if (subtitle) {
+    subtitle.textContent = selected
+      ? `vs ${selected.name}`
+      : "";
+  }
+  const empty = $("#eval-empty");
+  if (empty) {
+    const testedSeats = Object.keys(evaluation?.seats || {});
+    if (rounds.length && opponents.length) {
+      empty.textContent = "";
+    } else if (testedSeats.length) {
+      empty.textContent = `${name} is not a training seat, so it is never evaluated. Only training seats are tested against the League.`;
+    } else {
+      empty.textContent = "No evaluation episodes yet. Set an evaluation interval (k) on the campaign form to test the frozen agent against every League member.";
+    }
+  }
+  renderEvalOpponentLineup(opponents, selectedId);
+  drawSelectedEvaluationChart(rounds, opponents, selected, selectedIndex);
+}
+
+function renderEvalOpponentLineup(opponents, selectedId) {
+  const container = $("#eval-opponent-lineup");
+  if (!container) return;
+  if (!opponents.length) {
+    container.innerHTML = "";
+    return;
+  }
+  const focusKey = selectedId == null ? null : String(selectedId);
+  container.innerHTML = opponents.map((opponent, index) => {
+    const style = evalStyle(index);
+    const isFocus = String(opponent.opponent_member_id) === focusKey;
+    return `
+    <button type="button" class="seat-chip ${isFocus ? "focus" : ""}"
+      data-opponent="${escapeHtml(String(opponent.opponent_member_id))}"
+      aria-pressed="${isFocus ? "true" : "false"}"
+      title="Show evaluation against ${escapeHtml(opponent.name)}">
+      <span class="seat-chip-index">
+        <i class="legend-swatch" style="--swatch:${style.color}"></i>
+        Opponent
+      </span>
+      <strong>${escapeHtml(opponent.name)}</strong>
+      <small>${escapeHtml(opponent.agent_id || "")}</small>
+    </button>
+  `;
+  }).join("");
+  container.querySelectorAll(".seat-chip").forEach((button) => {
+    button.addEventListener("click", () => selectEvalOpponent(button.dataset.opponent));
+  });
+}
+
+function boxPlotValues(item) {
+  return [
+    item.whisker_low,
+    item.whisker_high,
+    item.q1,
+    item.q3,
+    item.median,
+    item.mean,
+    ...(item.outliers || []),
+  ].filter((value) => Number.isFinite(value));
+}
+
+function opponentEvalScale(rounds, opponentId) {
+  const values = rounds.flatMap((round) => {
+    const item = (round.opponents || []).find(
+      (entry) => String(entry.opponent_member_id) === String(opponentId),
+    );
+    return item ? boxPlotValues(item) : [];
+  });
+  if (!values.length) return null;
+  let minimum = Math.min(...values, 0);
+  let maximum = Math.max(...values, 0);
+  const headroom = (maximum - minimum) * 0.08 || 1;
+  minimum -= headroom;
+  maximum += headroom;
+  return { minimum, maximum, span: maximum - minimum || 1 };
+}
+
+function drawSelectedEvaluationChart(rounds, opponents, selected, selectedIndex) {
+  const canvas = $("#eval-chart");
+  if (!canvas) return;
+  const context = canvas.getContext("2d");
+  context.clearRect(0, 0, canvas.width, canvas.height);
+  if (!rounds.length || !selected) return;
+
+  const scale = opponentEvalScale(rounds, selected.opponent_member_id);
+  if (!scale) return;
+  const style = evalStyle(selectedIndex >= 0 ? selectedIndex : 0);
+  drawOpponentEvaluationChart(
+    canvas,
+    rounds,
+    selected.opponent_member_id,
+    style,
+    scale,
+  );
+}
+
+function drawOpponentEvaluationChart(canvas, rounds, opponentId, style, scale) {
+  if (!canvas) return;
+  const context = canvas.getContext("2d");
+  const width = canvas.width;
+  const height = canvas.height;
+  context.clearRect(0, 0, width, height);
+
+  const padding = { top: 16, right: 16, bottom: 40, left: 52 };
+  const plotWidth = width - padding.left - padding.right;
+  const plotHeight = height - padding.top - padding.bottom;
+  const { minimum, span } = scale;
+  const yAt = (value) => padding.top + plotHeight - ((value - minimum) / span) * plotHeight;
+
+  context.font = "12px Inter, system-ui, sans-serif";
+  context.textBaseline = "middle";
+  context.textAlign = "right";
+  for (let index = 0; index <= 4; index += 1) {
+    const value = minimum + (span / 4) * index;
+    const y = yAt(value);
+    context.strokeStyle = "#203954";
+    context.lineWidth = 1;
+    context.beginPath();
+    context.moveTo(padding.left, y);
+    context.lineTo(width - padding.right, y);
+    context.stroke();
+    context.fillStyle = "#8fa6ba";
+    context.fillText(value.toFixed(1), padding.left - 8, y);
+  }
+
+  const zeroY = yAt(0);
+  context.strokeStyle = "#8fa6ba";
+  context.setLineDash([4, 4]);
+  context.beginPath();
+  context.moveTo(padding.left, zeroY);
+  context.lineTo(width - padding.right, zeroY);
+  context.stroke();
+  context.setLineDash([]);
+
+  const columnCount = Math.max(rounds.length, 1);
+  const columnWidth = plotWidth / columnCount;
+  const boxWidth = Math.min(56, Math.max(22, columnWidth * 0.55));
+
+  rounds.forEach((round, roundIndex) => {
+    const item = (round.opponents || []).find(
+      (entry) => String(entry.opponent_member_id) === String(opponentId),
+    );
+    const columnCentre = padding.left + columnWidth * (roundIndex + 0.5);
+
+    if (item) {
+      const left = columnCentre - boxWidth / 2;
+      const top = yAt(item.q3);
+      const bottom = yAt(item.q1);
+      const boxHeight = Math.max(1, bottom - top);
+      const capWidth = boxWidth * 0.55;
+
+      context.fillStyle = `${style.color}33`;
+      context.fillRect(left, top, boxWidth, boxHeight);
+
+      context.strokeStyle = style.color;
+      context.lineWidth = 1.5;
+      context.beginPath();
+      context.moveTo(columnCentre, yAt(item.whisker_high));
+      context.lineTo(columnCentre, top);
+      context.moveTo(columnCentre, bottom);
+      context.lineTo(columnCentre, yAt(item.whisker_low));
+      context.stroke();
+      context.beginPath();
+      context.moveTo(columnCentre - capWidth / 2, yAt(item.whisker_high));
+      context.lineTo(columnCentre + capWidth / 2, yAt(item.whisker_high));
+      context.moveTo(columnCentre - capWidth / 2, yAt(item.whisker_low));
+      context.lineTo(columnCentre + capWidth / 2, yAt(item.whisker_low));
+      context.stroke();
+      context.strokeRect(left, top, boxWidth, boxHeight);
+
+      context.lineWidth = 2.5;
+      context.beginPath();
+      context.moveTo(left, yAt(item.median));
+      context.lineTo(left + boxWidth, yAt(item.median));
+      context.stroke();
+
+      const meanY = yAt(item.mean);
+      context.fillStyle = "#e8f0f7";
+      context.strokeStyle = style.color;
+      context.lineWidth = 1.25;
+      context.beginPath();
+      context.moveTo(columnCentre, meanY - 3);
+      context.lineTo(columnCentre + 3, meanY);
+      context.lineTo(columnCentre, meanY + 3);
+      context.lineTo(columnCentre - 3, meanY);
+      context.closePath();
+      context.fill();
+      context.stroke();
+
+      context.strokeStyle = style.color;
+      context.lineWidth = 1;
+      (item.outliers || []).forEach((value) => {
+        context.beginPath();
+        context.arc(columnCentre, yAt(value), 1.75, 0, Math.PI * 2);
+        context.stroke();
+      });
+    }
+
+    context.fillStyle = "#8fa6ba";
+    context.textAlign = "center";
+    context.textBaseline = "middle";
+    context.fillText(
+      String(roundIndex + 1),
+      columnCentre,
+      height - padding.bottom + 18,
+    );
+  });
 }
 
 function renderPayoffSummary(stats, focusSeat = "0") {
@@ -1138,6 +1428,28 @@ async function saveAgentSnapshot(event) {
   }
 }
 
+function formatBytes(value) {
+  const bytes = Number(value ?? 0);
+  if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  const power = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+  return `${(bytes / 1024 ** power).toFixed(power === 0 ? 0 : 1)} ${units[power]}`;
+}
+
+async function deleteStorage(path) {
+  const message = $("#campaign-message");
+  try {
+    const result = await api(path, { method: "DELETE" });
+    if (message) {
+      message.textContent = `Deleted ${formatBytes(result.bytes_freed)} of run data.`;
+    }
+  } catch (error) {
+    if (message) message.textContent = error.message;
+    return;
+  }
+  await Promise.all([loadCampaigns(), loadRuns()]);
+}
+
 async function loadCampaigns() {
   const values = await api("/api/campaigns");
   $("#campaign-list").innerHTML = values.map((campaign) => `
@@ -1145,6 +1457,7 @@ async function loadCampaigns() {
       <p class="eyebrow">${campaign.id}</p><h3>${campaign.name}</h3>
       <button class="stop-campaign danger" data-campaign="${campaign.id}">Stop all</button>
       <button class="resume-campaign" data-campaign="${campaign.id}">Resume all</button>
+      <button class="delete-campaign danger" data-campaign="${campaign.id}" data-name="${escapeHtml(campaign.name)}">Delete all data</button>
       ${campaign.jobs.map((job) => `
         <div class="job">
           <div><strong>${job.environment}</strong>
@@ -1164,7 +1477,7 @@ async function loadCampaigns() {
           <span>${job.run?.status || job.status}</span>
           <div><button class="danger stop-job" data-run="${job.run_id}">Stop</button>
           <button class="resume-job" data-run="${job.run_id}">Resume</button>
-          <button class="remove-job" data-run="${job.run_id}">Remove</button></div>
+          <button class="remove-job danger" data-run="${job.run_id}">Delete data</button></div>
         </div>
         <details><summary>Worker logs</summary>
           <button class="load-logs" data-run="${job.run_id}">Load latest</button>
@@ -1181,12 +1494,26 @@ async function loadCampaigns() {
     await loadCampaigns();
   }));
   document.querySelectorAll(".remove-job").forEach((button) => button.addEventListener("click", async () => {
+    const runId = button.dataset.run;
     const confirmed = window.confirm(
-      "Remove this job from campaign controls? Its run data and replays will be kept.",
+      `Permanently delete all stored data for ${runId}?\n\n`
+      + "This stops the worker and erases its database, episode replays, and checkpoint "
+      + "from disk. League members and Agent library snapshots are kept.\n\n"
+      + "This cannot be undone.",
     );
     if (!confirmed) return;
-    await api(`/api/jobs/${encodeURIComponent(button.dataset.run)}`, { method: "DELETE" });
-    await Promise.all([loadCampaigns(), loadRuns()]);
+    await deleteStorage(`/api/jobs/${encodeURIComponent(runId)}`);
+  }));
+  document.querySelectorAll(".delete-campaign").forEach((button) => button.addEventListener("click", async () => {
+    const confirmed = window.confirm(
+      `Permanently delete all stored data for campaign "${button.dataset.name}"?\n\n`
+      + "This stops every job in the campaign and erases each run's database, episode "
+      + "replays, and checkpoints from disk, including jobs already removed from this "
+      + "list. League members and Agent library snapshots are kept.\n\n"
+      + "This cannot be undone.",
+    );
+    if (!confirmed) return;
+    await deleteStorage(`/api/campaigns/${encodeURIComponent(button.dataset.campaign)}`);
   }));
   document.querySelectorAll(".stop-campaign").forEach((button) => button.addEventListener("click", async () => {
     await api(`/api/campaigns/${encodeURIComponent(button.dataset.campaign)}/stop`, { method: "POST" });
@@ -1243,9 +1570,11 @@ async function submitCampaign(event) {
     seed: Number(form.get("seed")),
     episodes: optionalNumber("episodes"),
     checkpoint_interval: Number(form.get("checkpoint_interval")),
-    update_interval: Number(form.get("update_interval") || 1),
+    eval_interval: Number(form.get("eval_interval") || 0),
+    eval_episodes: Number(form.get("eval_episodes") || 20),
     league_reroll_interval: Number(form.get("league_reroll_interval") || 0),
     starting_stack: Number(form.get("starting_stack") || 50),
+    episode_mode: form.get("episode_mode") || "session",
     agent_memory_size: Number(form.get("agent_memory_size")),
     cpus: Number(form.get("cpus")),
     memory: form.get("memory"),
@@ -1452,6 +1781,7 @@ $("#run-select").addEventListener("change", async (event) => {
   state.selectedRun = event.target.value;
   state.selectedEpisode = null;
   state.selectedOverviewSeat = null;
+  state.selectedEvalOpponent = null;
   $("#replay-run-select").value = state.selectedRun;
   updateRunEnvironmentLabels();
   await Promise.all([loadStatistics(), loadEpisodes()]);
@@ -1460,6 +1790,7 @@ $("#replay-run-select").addEventListener("change", async (event) => {
   state.selectedRun = event.target.value;
   state.selectedEpisode = null;
   state.selectedOverviewSeat = null;
+  state.selectedEvalOpponent = null;
   $("#run-select").value = state.selectedRun;
   updateRunEnvironmentLabels();
   await Promise.all([loadStatistics(), loadEpisodes()]);
@@ -1502,12 +1833,24 @@ $("#step-play").addEventListener("click", () => {
 
 initialize();
 setInterval(() => {
-  loadRuns();
-  loadCampaigns();
-  // Skip league refresh while its tab is open so selections and drags are not lost.
-  if (state.activeTab !== "league") {
-    loadAgentSnapshots();
-    loadLeagueMembers();
-    loadAllLeagueMembers();
+  if (state.pollInFlight) return;
+  state.pollInFlight = true;
+  // Keep the run list and campaign status cheap. Heavy statistics only refresh
+  // when the Overview tab is open, and never stack on a previous slow request.
+  const tasks = [
+    loadRuns({ refreshDetails: false }),
+    loadCampaigns(),
+  ];
+  if (state.activeTab === "overview" && state.selectedRun) {
+    tasks.push(loadStatistics());
   }
+  if (state.activeTab === "replay" && state.selectedRun) {
+    tasks.push(loadEpisodes());
+  }
+  if (state.activeTab !== "league") {
+    tasks.push(loadAgentSnapshots(), loadLeagueMembers(), loadAllLeagueMembers());
+  }
+  Promise.allSettled(tasks).finally(() => {
+    state.pollInFlight = false;
+  });
 }, 15000);

@@ -88,3 +88,26 @@ def test_policy_era_database_columns_remain_readable_and_are_migrated(tmp_path):
             row[1] for row in connection.execute("PRAGMA table_info(runs)").fetchall()
         }
     assert {"agent_name", "agent_version"} <= columns
+
+
+def test_empty_sqlite_file_is_readable_and_repairable(tmp_path):
+    path = tmp_path / "empty.sqlite"
+    sqlite3.connect(path).close()
+    assert RunDatabase(path, initialize=False).get_run() is None
+
+    repaired = RunDatabase(path)
+    repaired.create_run("fixed", "leduc-holdem", "random", 1, {})
+    assert repaired.get_run()["id"] == "fixed"
+
+
+def test_connections_close_so_the_write_ahead_log_is_checkpointed(tmp_path):
+    path = tmp_path / "wal.sqlite"
+    database = RunDatabase(path)
+    database.create_run("wal-run", "leduc-holdem", "random", 1, {})
+    database.add_event("started", "x" * 50_000)
+
+    # A leaked handle keeps -wal on disk and locks the file against deletion.
+    assert not path.with_name("wal.sqlite-wal").exists()
+    assert not path.with_name("wal.sqlite-shm").exists()
+    path.unlink()
+    assert not path.exists()

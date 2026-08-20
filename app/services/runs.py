@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -39,6 +40,7 @@ class RunsService:
     def statistics(self, run_id: str) -> dict[str, Any]:
         database = self.database(run_id)
         stats = database.statistics()
+        stats["evaluation"] = database.evaluation_summary()
         seats = self._seat_lineup(run_id, database)
         stats["seats"] = seats
         focus_seat = self._focus_seat(seats)
@@ -69,6 +71,39 @@ class RunsService:
     def export(self, run_id: str) -> Path:
         path = self.runs_directory / run_id / f"{run_id}.json"
         return export_json(self.database(run_id), path)
+
+    def directory_size(self, run_id: str) -> int:
+        self._validate_run_id(run_id)
+        directory = self.runs_directory / run_id
+        if not directory.is_dir():
+            return 0
+        return sum(
+            path.stat().st_size for path in directory.rglob("*") if path.is_file()
+        )
+
+    def delete_run(self, run_id: str) -> int:
+        """Delete a run directory and report the bytes reclaimed.
+
+        Removes the SQLite database along with its ``-wal`` and ``-shm``
+        sidecars, the checkpoint, worker logs, and any exports.
+        """
+        self._validate_run_id(run_id)
+        directory = (self.runs_directory / run_id).resolve()
+        # Never follow a symlink or a crafted ID outside the runs root.
+        if directory.parent != self.runs_directory or directory == self.runs_directory:
+            raise ValueError("Invalid run ID.")
+        if not directory.is_dir():
+            return 0
+        freed = self.directory_size(run_id)
+        try:
+            shutil.rmtree(directory)
+        except OSError as error:
+            # A live worker still holds run.sqlite open on Windows.
+            raise RuntimeError(
+                f"Could not delete run {run_id}: {error}. "
+                "Stop the worker and try again."
+            ) from error
+        return freed
 
     def _seat_lineup(self, run_id: str, database: RunDatabase) -> list[dict[str, Any]]:
         seat_configs = self._seat_configs(run_id, database)

@@ -86,21 +86,73 @@ CREATE INDEX IF NOT EXISTS idx_steps_player ON steps(player_id);
 CREATE INDEX IF NOT EXISTS idx_metrics_run_name ON metric_snapshots(run_id, name, episode_number);
 """
 
+# Kept separate so a worker writing to a database created before evaluation
+# sweeps existed can create the table on demand.
+EVALUATION_SCHEMA_SQL = """
+CREATE TABLE IF NOT EXISTS evaluation_episodes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id TEXT NOT NULL,
+    round_index INTEGER NOT NULL,
+    training_episode INTEGER NOT NULL,
+    agent_version INTEGER NOT NULL,
+    seat INTEGER NOT NULL,
+    opponent_member_id TEXT NOT NULL,
+    opponent_name TEXT NOT NULL,
+    opponent_agent_id TEXT NOT NULL,
+    episode_index INTEGER NOT NULL,
+    seed INTEGER NOT NULL,
+    payoff REAL NOT NULL,
+    outcome TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE(run_id, round_index, seat, opponent_member_id, episode_index)
+);
+CREATE INDEX IF NOT EXISTS idx_eval_run_seat
+    ON evaluation_episodes(run_id, seat, opponent_member_id);
+"""
+
+SCHEMA_SQL += EVALUATION_SCHEMA_SQL
+
+
+class ScopedConnection(sqlite3.Connection):
+    """A connection that closes itself at the end of its ``with`` block.
+
+    Plain ``sqlite3`` connections only commit on ``__exit__``; the handle stays
+    open until garbage collection. That kept run databases locked against
+    deletion and left the write-ahead log uncheckpointed and growing.
+    """
+
+    def __exit__(self, *exc_info: Any) -> None:
+        try:
+            super().__exit__(*exc_info)
+        finally:
+            self.close()
+
 
 class RunDatabase:
     def __init__(self, path: str | Path, *, initialize: bool = True) -> None:
         self.path = Path(path)
         if initialize:
             self.path.parent.mkdir(parents=True, exist_ok=True)
-            with self.connect() as connection:
-                connection.executescript(SCHEMA_SQL)
-                self._migrate_legacy_schema(connection)
+            self.ensure_schema()
+
+    def ensure_schema(self) -> None:
+        """Create missing tables and apply legacy column renames."""
+        with self.connect() as connection:
+            connection.executescript(SCHEMA_SQL)
+            self._migrate_legacy_schema(connection)
 
     def connect(self, *, readonly: bool = False) -> sqlite3.Connection:
         if readonly:
-            connection = sqlite3.connect(f"file:{self.path}?mode=ro", uri=True, timeout=10)
+            connection = sqlite3.connect(
+                f"file:{self.path}?mode=ro",
+                uri=True,
+                timeout=10,
+                factory=ScopedConnection,
+            )
         else:
-            connection = sqlite3.connect(self.path, timeout=30)
+            connection = sqlite3.connect(
+                self.path, timeout=30, factory=ScopedConnection
+            )
             try:
                 connection.execute("PRAGMA journal_mode=WAL")
             except sqlite3.DatabaseError:
@@ -108,6 +160,27 @@ class RunDatabase:
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA foreign_keys=ON")
         return connection
+
+    def checkpoint_wal(self) -> int:
+        """Fold the write-ahead log back into the database and reset it.
+
+        Dashboard polling keeps readers on the file almost continuously, which
+        can starve SQLite's automatic checkpoint and let ``run.sqlite-wal`` grow
+        without bound; one interrupted run left a 3.6 GB log behind that cost
+        seconds of latency on every fresh connection. Returns the number of
+        bytes reclaimed.
+        """
+        wal = self.path.with_name(self.path.name + "-wal")
+        if not wal.exists():
+            return 0
+        before = wal.stat().st_size
+        try:
+            with self.connect() as connection:
+                connection.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        except sqlite3.DatabaseError:
+            return 0
+        after = wal.stat().st_size if wal.exists() else 0
+        return max(0, before - after)
 
     @staticmethod
     def _columns(connection: sqlite3.Connection, table: str) -> set[str]:
@@ -158,8 +231,14 @@ class RunDatabase:
             )
 
     def get_run(self) -> dict[str, Any] | None:
-        with self.connect(readonly=True) as connection:
-            row = connection.execute("SELECT * FROM runs LIMIT 1").fetchone()
+        try:
+            with self.connect(readonly=True) as connection:
+                row = connection.execute("SELECT * FROM runs LIMIT 1").fetchone()
+        except sqlite3.OperationalError as error:
+            # Empty or partially-created files show up as "no such table".
+            if "no such table" in str(error).lower():
+                return None
+            raise
         return self._run_row(row) if row else None
 
     def update_run(self, **values: Any) -> None:
@@ -342,48 +421,56 @@ class RunDatabase:
 
     def statistics(self, *, rolling_limit: int = 100) -> dict[str, Any]:
         with self.connect(readonly=True) as connection:
-            summary = connection.execute(
-                """
-                SELECT COUNT(*) AS episodes,
-                       COALESCE(AVG(duration_seconds), 0) AS average_duration,
-                       COALESCE(AVG((SELECT COUNT(*) FROM steps s WHERE s.episode_id=e.id)), 0)
-                           AS average_steps,
-                       COALESCE(SUM(duration_seconds), 0) AS total_duration
-                FROM episodes e
-                """
-            ).fetchone()
             version_column = (
                 "agent_version"
                 if "agent_version" in self._columns(connection, "episodes")
                 else "policy_version"
             )
+            # Overview polling must stay on the episodes table only. Touching
+            # ``steps`` (hundreds of thousands of rows per cash-session run)
+            # made every dashboard refresh hang for tens of seconds and stacked
+            # requests until the page appeared frozen.
             payoff_rows = connection.execute(
                 f"""
                 SELECT episode_number, {version_column} AS agent_version,
-                       duration_seconds, payoffs_json, outcomes_json,
-                       (SELECT COUNT(*) FROM steps s WHERE s.episode_id = episodes.id)
-                           AS step_count
-                FROM episodes ORDER BY episode_number
+                       duration_seconds, payoffs_json, outcomes_json
+                FROM episodes
+                ORDER BY episode_number
                 """
             ).fetchall()
+            # Cheap approximate action mix: sample recent steps only.
             action_rows = connection.execute(
                 """
                 SELECT action_name, player_id, COUNT(*) AS count
-                FROM steps GROUP BY action_name, player_id ORDER BY action_name, player_id
+                FROM steps
+                WHERE episode_id IN (
+                    SELECT id FROM episodes ORDER BY episode_number DESC LIMIT 50
+                )
+                GROUP BY action_name, player_id
+                ORDER BY action_name, player_id
+                """
+            ).fetchall()
+            length_rows = connection.execute(
+                """
+                SELECT COUNT(*) AS step_count
+                FROM steps
+                WHERE episode_id IN (
+                    SELECT id FROM episodes ORDER BY episode_number DESC LIMIT 50
+                )
+                GROUP BY episode_id
                 """
             ).fetchall()
 
         seat_payoffs: dict[int, list[float]] = {}
         outcome_counts: dict[int, dict[str, int]] = {}
-        step_counts: list[float] = []
         durations: list[float] = []
         rolling: list[dict[str, Any]] = []
         recent_by_seat: dict[int, list[float]] = {}
+        recent_sum_by_seat: dict[int, float] = {}
         cumulative_by_seat: dict[int, float] = {}
         for row in payoff_rows:
             payoffs = [float(value) for value in json.loads(row["payoffs_json"])]
             outcomes = json.loads(row["outcomes_json"])
-            step_counts.append(float(row["step_count"] or 0))
             durations.append(float(row["duration_seconds"] or 0))
             for seat, payoff in enumerate(payoffs):
                 seat_payoffs.setdefault(seat, []).append(payoff)
@@ -394,14 +481,17 @@ class RunDatabase:
             seat_points: dict[str, dict[str, Any]] = {}
             for seat, payoff in enumerate(payoffs):
                 window = recent_by_seat.setdefault(seat, [])
+                window_sum = recent_sum_by_seat.get(seat, 0.0) + payoff
                 window.append(payoff)
-                recent_by_seat[seat] = window[-rolling_limit:]
+                if len(window) > rolling_limit:
+                    window_sum -= window.pop(0)
+                recent_by_seat[seat] = window
+                recent_sum_by_seat[seat] = window_sum
                 cumulative_by_seat[seat] = cumulative_by_seat.get(seat, 0.0) + payoff
-                window_summary = descriptive.mean_ci(recent_by_seat[seat])
                 seat_points[str(seat)] = {
-                    "average_payoff": window_summary["mean"],
-                    "ci_low": window_summary["ci_low"],
-                    "ci_high": window_summary["ci_high"],
+                    "average_payoff": window_sum / len(window),
+                    "ci_low": None,
+                    "ci_high": None,
                     "cumulative_average": cumulative_by_seat[seat] / episode_index,
                 }
             seat_zero = seat_points.get("0", {})
@@ -418,6 +508,20 @@ class RunDatabase:
                     "agent_version": row["agent_version"],
                 }
             )
+
+        step_counts = [float(row["step_count"] or 0) for row in length_rows]
+        episode_count = len(payoff_rows)
+        total_duration = float(sum(durations))
+        summary = {
+            "episodes": episode_count,
+            "average_duration": (
+                total_duration / episode_count if episode_count else 0.0
+            ),
+            "average_steps": (
+                sum(step_counts) / len(step_counts) if step_counts else 0.0
+            ),
+            "total_duration": total_duration,
+        }
 
         seat_payoff_stats = {
             str(seat): descriptive.mean_ci(values)
@@ -489,6 +593,191 @@ class RunDatabase:
                 ],
                 "seat_0_std_payoff": seat_zero["std"],
             },
+        }
+
+    def save_evaluation_episodes(self, rows: list[dict[str, Any]]) -> int:
+        """Persist frozen test episodes. Replaces rows so a resumed round is idempotent."""
+        if not rows:
+            return 0
+        now = utc_now()
+        with self.connect() as connection:
+            connection.executescript(EVALUATION_SCHEMA_SQL)
+            run = connection.execute("SELECT id FROM runs LIMIT 1").fetchone()
+            if not run:
+                return 0
+            connection.executemany(
+                """
+                INSERT OR REPLACE INTO evaluation_episodes (
+                    run_id, round_index, training_episode, agent_version, seat,
+                    opponent_member_id, opponent_name, opponent_agent_id,
+                    episode_index, seed, payoff, outcome, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    (
+                        run["id"],
+                        int(row["round_index"]),
+                        int(row["training_episode"]),
+                        int(row["agent_version"]),
+                        int(row["seat"]),
+                        str(row["opponent_member_id"]),
+                        str(row["opponent_name"]),
+                        str(row["opponent_agent_id"]),
+                        int(row["episode_index"]),
+                        int(row["seed"]),
+                        float(row["payoff"]),
+                        str(row["outcome"]),
+                        now,
+                    )
+                    for row in rows
+                ],
+            )
+        return len(rows)
+
+    def evaluation_summary(self, *, outlier_limit: int = 50) -> dict[str, Any]:
+        """Box-plot statistics per seat, evaluation round, and League opponent.
+
+        Rounds are kept separate so the Overview chart can place one column per
+        testing set, with opponent boxes overlaid at the same x position.
+        """
+        empty: dict[str, Any] = {"seats": {}, "rounds": 0, "episodes": 0}
+        with self.connect(readonly=True) as connection:
+            exists = connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+                ("evaluation_episodes",),
+            ).fetchone()
+            if not exists:
+                return empty
+            rows = connection.execute(
+                """
+                SELECT seat, opponent_member_id, opponent_name, opponent_agent_id,
+                       round_index, training_episode, agent_version, payoff, outcome
+                FROM evaluation_episodes
+                ORDER BY seat, round_index, opponent_name, episode_index
+                """
+            ).fetchall()
+        if not rows:
+            return empty
+
+        # seat -> member_id -> meta; seat -> round_index -> member_id -> bucket
+        opponent_meta: dict[str, dict[str, dict[str, Any]]] = {}
+        grouped: dict[str, dict[int, dict[str, dict[str, Any]]]] = {}
+        round_meta: dict[str, dict[int, dict[str, int]]] = {}
+        for row in rows:
+            seat = str(row["seat"])
+            member_id = str(row["opponent_member_id"])
+            round_index = int(row["round_index"])
+            opponent_meta.setdefault(seat, {}).setdefault(
+                member_id,
+                {
+                    "opponent_member_id": member_id,
+                    "name": str(row["opponent_name"]),
+                    "agent_id": str(row["opponent_agent_id"]),
+                },
+            )
+            round_meta.setdefault(seat, {}).setdefault(
+                round_index,
+                {
+                    "round_index": round_index,
+                    "training_episode": int(row["training_episode"]),
+                    "agent_version": int(row["agent_version"]),
+                },
+            )
+            bucket = (
+                grouped.setdefault(seat, {})
+                .setdefault(round_index, {})
+                .setdefault(
+                    member_id,
+                    {
+                        "opponent_member_id": member_id,
+                        "name": str(row["opponent_name"]),
+                        "agent_id": str(row["opponent_agent_id"]),
+                        "payoffs": [],
+                        "outcomes": {"win": 0, "loss": 0, "draw": 0},
+                    },
+                )
+            )
+            bucket["payoffs"].append(float(row["payoff"]))
+            outcome = str(row["outcome"])
+            if outcome in bucket["outcomes"]:
+                bucket["outcomes"][outcome] += 1
+
+        seats: dict[str, Any] = {}
+        for seat, rounds_by_index in grouped.items():
+            opponents = sorted(
+                opponent_meta[seat].values(),
+                key=lambda item: item["name"].lower(),
+            )
+            round_summaries = []
+            for round_index in sorted(rounds_by_index):
+                meta = round_meta[seat][round_index]
+                by_member = rounds_by_index[round_index]
+                boxes = []
+                for opponent in opponents:
+                    bucket = by_member.get(opponent["opponent_member_id"])
+                    if bucket is None:
+                        continue
+                    boxes.append(
+                        self._box_plot_summary(bucket, outlier_limit=outlier_limit)
+                    )
+                round_summaries.append(
+                    {
+                        "round_index": meta["round_index"],
+                        "training_episode": meta["training_episode"],
+                        "agent_version": meta["agent_version"],
+                        "opponents": boxes,
+                    }
+                )
+            seats[seat] = {
+                "episodes": sum(
+                    int(box["n"])
+                    for round_item in round_summaries
+                    for box in round_item["opponents"]
+                ),
+                "opponents": opponents,
+                "rounds": round_summaries,
+            }
+        return {
+            "seats": seats,
+            "rounds": max((len(value["rounds"]) for value in seats.values()), default=0),
+            "episodes": len(rows),
+        }
+
+    @staticmethod
+    def _box_plot_summary(
+        bucket: dict[str, Any], *, outlier_limit: int
+    ) -> dict[str, Any]:
+        payoffs: list[float] = bucket["payoffs"]
+        ordered = sorted(payoffs)
+        q1 = descriptive.percentile(ordered, 0.25)
+        q3 = descriptive.percentile(ordered, 0.75)
+        # Tukey fences: whiskers reach the most extreme point still within
+        # 1.5 IQR of the box; anything past that is drawn as an outlier.
+        fence = 1.5 * (q3 - q1)
+        inside = [value for value in ordered if q1 - fence <= value <= q3 + fence]
+        whisker_low = inside[0] if inside else (ordered[0] if ordered else 0.0)
+        whisker_high = inside[-1] if inside else (ordered[-1] if ordered else 0.0)
+        outliers = [value for value in ordered if value < whisker_low or value > whisker_high]
+        stats = descriptive.mean_ci(ordered)
+        return {
+            "opponent_member_id": bucket["opponent_member_id"],
+            "name": bucket["name"],
+            "agent_id": bucket["agent_id"],
+            "n": len(ordered),
+            "min": ordered[0] if ordered else 0.0,
+            "max": ordered[-1] if ordered else 0.0,
+            "q1": q1,
+            "median": descriptive.median(ordered),
+            "q3": q3,
+            "whisker_low": whisker_low,
+            "whisker_high": whisker_high,
+            "mean": stats["mean"],
+            "std": stats["std"],
+            "ci_low": stats["ci_low"],
+            "ci_high": stats["ci_high"],
+            "outliers": outliers[:outlier_limit],
+            "outliers_truncated": max(0, len(outliers) - outlier_limit),
+            "outcomes": descriptive.summarize_outcomes(bucket["outcomes"]),
         }
 
     def save_metrics(

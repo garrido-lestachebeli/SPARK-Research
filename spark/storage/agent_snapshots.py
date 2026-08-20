@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from spark.agents import create_agent, default_agent_id, list_agents
+from spark.environments.rlcard_poker import normalize_episode_mode
 from spark.models import utc_now
 
 SNAPSHOT_ID = re.compile(r"^agent-[a-f0-9]{12}$")
@@ -155,9 +156,11 @@ class AgentSnapshotStore:
         checkpoint_interval: int,
         episode_limit: int | None,
         agent_memory_size: int,
-        update_interval: int = 1,
+        eval_interval: int = 0,
+        eval_episodes: int = 20,
         league_reroll_interval: int = 0,
         starting_stack: float = 50.0,
+        episode_mode: str = "session",
         league_store: Any | None = None,
     ) -> Path:
         run_id = self._run_id(run_id)
@@ -237,9 +240,11 @@ class AgentSnapshotStore:
                 "checkpoint_interval": checkpoint_interval,
                 "episode_limit": episode_limit,
                 "agent_memory_size": agent_memory_size,
-                "update_interval": max(1, int(update_interval)),
+                "eval_interval": max(0, int(eval_interval)),
+                "eval_episodes": max(1, int(eval_episodes)),
                 "league_reroll_interval": max(0, int(league_reroll_interval)),
                 "starting_stack": max(1.0, float(starting_stack)),
+                "episode_mode": normalize_episode_mode(episode_mode),
             },
             "next_episode_number": 0,
             "agent_version": 0,

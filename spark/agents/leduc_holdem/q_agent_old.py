@@ -12,7 +12,7 @@ from spark.models import Episode
 
 class LeducQAgent(Agent):
     agent_id = "TestAgent"
-    name = "Leduc Testing"
+    name = "Old Q-Agent"
     environment_id = "leduc-holdem"
     action_names = {0: "call", 1: "raise", 2: "fold", 3: "check"}
 
@@ -80,7 +80,10 @@ class LeducQAgent(Agent):
                 "alpha": self.alpha,
                 "gamma": self.gamma,
                 "epsilon": self.epsilon,
-                "q_table": {repr(key): values for key, values in self.q.items()},
+                "q_table": [
+                    [list(key), [float(value) for value in values]]
+                    for key, values in self.q.items()
+                ],
             }
         )
         return state
@@ -91,5 +94,15 @@ class LeducQAgent(Agent):
         self.gamma = float(state.get("gamma", self.gamma))
         self.epsilon = float(state.get("epsilon", self.epsilon))
         self.q.clear()
-        for key, values in dict(state.get("q_table", {})).items():
-            self.q[tuple(ast.literal_eval(key))] = [float(value) for value in values]
+        raw_table = state.get("q_table", {})
+        if isinstance(raw_table, dict):
+            items = (
+                (tuple(ast.literal_eval(key)), values)
+                for key, values in raw_table.items()
+            )
+        else:
+            items = ((tuple(key), values) for key, values in raw_table)
+        for key, values in items:
+            self.q[tuple(float(part) for part in key)] = [
+                float(value) for value in values
+            ]

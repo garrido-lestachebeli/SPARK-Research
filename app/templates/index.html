@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>SPARK Training Console</title>
   <!-- Relative paths so Open OnDemand /rnode and /node proxies work. -->
-  <link rel="stylesheet" href="static/style.css?v=replay-cards-1">
+  <link rel="stylesheet" href="static/style.css?v=eval-overlay-4">
 </head>
 <body>
   <header class="topbar">
@@ -55,6 +55,21 @@
             <span><i class="legend-line cumulative"></i>Cumulative mean</span>
           </div>
           <canvas id="payoff-chart" width="900" height="300"></canvas>
+        </article>
+      </section>
+
+      <section class="overview-section">
+        <article class="panel trend-panel">
+          <div class="panel-title">
+            <div>
+              <p class="eyebrow">Evaluation</p>
+              <h3 id="eval-chart-title">Test payoff by evaluation round</h3>
+            </div>
+            <span id="eval-window"></span>
+          </div>
+          <div id="eval-opponent-lineup" class="seat-lineup" aria-label="Select League opponent"></div>
+          <canvas id="eval-chart" width="1800" height="600" aria-label="Evaluation chart for selected opponent"></canvas>
+          <p id="eval-empty" class="help"></p>
         </article>
       </section>
 
@@ -123,9 +138,13 @@
           <div class="two-columns">
             <label>Base seed<input name="seed" type="number" value="42"></label>
             <label>Episode limit<input name="episodes" type="number" min="1" placeholder="Blank = continuous"></label>
-            <label title="Buffer this many episodes, then train on all of them">
-              Update interval (N)
-              <input name="update_interval" type="number" min="1" value="1">
+            <label title="Freeze the agent every K episodes and test it against every League member; 0 disables evaluation">
+              Evaluation interval (k)
+              <input name="eval_interval" type="number" min="0" value="0">
+            </label>
+            <label title="Test episodes played against each League member per evaluation round">
+              Test episodes (n)
+              <input name="eval_episodes" type="number" min="1" value="20">
             </label>
             <label title="Re-roll League (random) seats every K episodes; 0 keeps the same opponent">
               League re-roll (K)
@@ -134,6 +153,13 @@
             <label title="Chip buy-in at the start of each cash-session episode">
               Starting stack
               <input name="starting_stack" type="number" min="1" step="1" value="50">
+            </label>
+            <label title="session = keep playing hands until someone busts; hand = one poker hand per episode">
+              Episode mode
+              <select name="episode_mode">
+                <option value="session" selected>Play until bust</option>
+                <option value="hand">Single hand</option>
+              </select>
             </label>
             <label>Checkpoint interval<input name="checkpoint_interval" type="number" min="1" value="100"></label>
             <label>Agent memory<input name="agent_memory_size" type="number" min="0" value="100"></label>
@@ -145,7 +171,9 @@
           <p class="help">
             Seat source <strong>League (random)</strong> draws from active League members.
             Re-roll K=0 keeps that draw for the whole run; K&gt;0 swaps every K episodes.
-            Update interval N buffers episodes and trains on all of them together.
+            The agent learns after every episode. Evaluation interval k freezes it every
+            k episodes and plays n test episodes against every active League member;
+            those results feed the box plot on the Overview tab and are never trained on.
             Starting stack is the chip buy-in for each seat at the start of a session episode
             (play continues until someone goes bust).
           </p>
@@ -327,6 +355,6 @@
     </section>
   </main>
 
-  <script src="static/app.js?v=replay-cards-1"></script>
+  <script src="static/app.js?v=eval-overlay-4"></script>
 </body>
 </html>

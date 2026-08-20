@@ -146,14 +146,13 @@ def test_each_environment_runs_with_its_matching_agent(tmp_path, environment_id)
     assert trainer.run() == 1
 
 
-def test_update_interval_buffers_episodes_then_trains_on_all(tmp_path):
+def test_training_seat_learns_after_every_episode(tmp_path):
     trainer = Trainer(
         TrainerConfig(
-            run_id="buffered",
+            run_id="per-episode",
             environment="leduc-holdem",
             run_directory=str(tmp_path),
             episode_limit=3,
-            update_interval=3,
             seat_configs=[
                 {"agent_id": "leduc-q", "mode": "train"},
                 {"agent_id": "leduc-random", "mode": "evaluate"},
@@ -161,10 +160,112 @@ def test_update_interval_buffers_episodes_then_trains_on_all(tmp_path):
         )
     )
     trainer.run()
-    # One flush after 3 episodes → one agent_version bump; all 3 episodes learned.
-    assert trainer.agent_version == 1
+    assert trainer.agent_version == 3
     assert trainer.agents[0].episodes_seen == 3
     assert len(trainer.agents[0].q) > 0
+
+
+def evaluation_config(directory: Path, run_id: str, **overrides) -> TrainerConfig:
+    settings = {
+        "run_id": run_id,
+        "environment": "leduc-holdem",
+        "run_directory": str(directory),
+        "episode_limit": 2,
+        "eval_interval": 2,
+        "eval_episodes": 3,
+        "seat_configs": [
+            {"agent_id": "leduc-q", "mode": "train"},
+            {"agent_id": "leduc-random", "mode": "evaluate"},
+        ],
+    }
+    settings.update(overrides)
+    return TrainerConfig(**settings)
+
+
+def test_evaluation_round_tests_every_active_league_member(tmp_path):
+    from spark.storage import LeagueMemberStore
+
+    league = LeagueMemberStore(tmp_path)
+    league.create_blank("A", "leduc-holdem", "leduc-q", status="league")
+    league.create_blank("B", "leduc-holdem", "leduc-random", status="league")
+    league.create_blank("Benched", "leduc-holdem", "leduc-random", status="bench")
+
+    trainer = Trainer(evaluation_config(tmp_path, "sweep"))
+    trainer.run()
+
+    # Evaluation must not consume the episode budget or the training tables.
+    assert trainer.next_episode_number == 2
+    database = RunDatabase(tmp_path / "sweep" / "run.sqlite", initialize=False)
+    assert database.get_run()["episode_count"] == 2
+    assert len(database.list_episodes(limit=100)) == 2
+
+    summary = database.evaluation_summary()
+    assert summary["rounds"] == 1
+    # Two active members times three test episodes; the benched member is excluded.
+    assert summary["episodes"] == 6
+    opponents = summary["seats"]["0"]["opponents"]
+    assert [item["name"] for item in opponents] == ["A", "B"]
+    boxes = summary["seats"]["0"]["rounds"][0]["opponents"]
+    assert all(item["n"] == 3 for item in boxes)
+
+
+def test_evaluation_leaves_the_live_training_agent_untouched(tmp_path):
+    from spark.storage import LeagueMemberStore
+
+    league = LeagueMemberStore(tmp_path)
+    league.create_blank("A", "leduc-holdem", "leduc-q", status="league")
+
+    trainer = Trainer(evaluation_config(tmp_path, "frozen-sweep", episode_limit=1, eval_interval=1))
+    trainer.run_episode(0)
+    before = json.dumps(trainer.agents[0].state_dict(), sort_keys=True)
+    seen_before = trainer.agents[0].episodes_seen
+    trainer.next_episode_number = 1
+    trainer._run_evaluation_round()
+
+    assert json.dumps(trainer.agents[0].state_dict(), sort_keys=True) == before
+    assert trainer.agents[0].episodes_seen == seen_before
+
+
+def test_evaluation_without_league_opponents_is_skipped(tmp_path):
+    trainer = Trainer(evaluation_config(tmp_path, "no-opponents"))
+    trainer.run()
+
+    database = RunDatabase(tmp_path / "no-opponents" / "run.sqlite", initialize=False)
+    assert database.evaluation_summary()["episodes"] == 0
+    assert database.get_run()["status"] == "completed"
+
+
+def test_evaluation_excludes_the_training_seats_own_league_entry(tmp_path):
+    from spark.storage import LeagueMemberStore
+
+    league = LeagueMemberStore(tmp_path)
+    own = league.create_blank("Self", "leduc-holdem", "leduc-q", status="league")
+    league.create_blank("Rival", "leduc-holdem", "leduc-random", status="league")
+
+    trainer = Trainer(
+        evaluation_config(
+            tmp_path,
+            "self-excluded",
+            seat_configs=[
+                {
+                    "source": "league_member",
+                    "agent_id": "leduc-q",
+                    "mode": "train",
+                    "league_member_id": own["id"],
+                },
+                {"agent_id": "leduc-random", "mode": "evaluate"},
+            ],
+        )
+    )
+    trainer.run()
+
+    database = RunDatabase(tmp_path / "self-excluded" / "run.sqlite", initialize=False)
+    opponents = database.evaluation_summary()["seats"]["0"]["opponents"]
+    assert [item["name"] for item in opponents] == ["Rival"]
+    assert [
+        item["name"]
+        for item in database.evaluation_summary()["seats"]["0"]["rounds"][0]["opponents"]
+    ] == ["Rival"]
 
 
 def test_league_random_reroll_persists_and_swaps(tmp_path):
@@ -180,7 +281,6 @@ def test_league_random_reroll_persists_and_swaps(tmp_path):
             run_directory=str(tmp_path),
             episode_limit=2,
             league_reroll_interval=1,
-            update_interval=1,
             seat_configs=[
                 {
                     "source": "fresh",

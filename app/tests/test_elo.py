@@ -51,7 +51,7 @@ def test_trainer_updates_league_elo_after_n_episodes(tmp_path):
             environment="leduc-holdem",
             run_directory=str(tmp_path),
             episode_limit=6,
-            update_interval=3,
+            eval_interval=3,
             checkpoint_interval=100,
             seat_configs=[
                 {

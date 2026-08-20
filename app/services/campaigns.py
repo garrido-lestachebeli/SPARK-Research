@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import random
+import sqlite3
 import subprocess
 import sys
 import uuid
@@ -13,6 +14,7 @@ from typing import Any
 
 from spark.agents import create_agent, default_agent_id
 from spark.environments import list_environments
+from spark.environments.rlcard_poker import normalize_episode_mode
 from spark.slurm.client import SlurmClient
 from spark.storage import AgentSnapshotStore, LeagueError, LeagueMemberStore
 
@@ -47,11 +49,13 @@ class CampaignService:
         config = dict(config)
         config["environments"] = environments
         config["tables"] = tables
-        config["update_interval"] = max(1, int(config.get("update_interval", 1)))
+        config["eval_interval"] = max(0, int(config.get("eval_interval", 0)))
+        config["eval_episodes"] = max(1, int(config.get("eval_episodes", 20)))
         config["league_reroll_interval"] = max(
             0, int(config.get("league_reroll_interval", 0))
         )
         config["starting_stack"] = max(1.0, float(config.get("starting_stack", 50)))
+        config["episode_mode"] = normalize_episode_mode(config.get("episode_mode", "session"))
 
         campaign_id = f"campaign-{uuid.uuid4().hex[:10]}"
         name = str(config.get("name") or campaign_id)
@@ -80,9 +84,11 @@ class CampaignService:
                 checkpoint_interval=int(config.get("checkpoint_interval", 100)),
                 episode_limit=config.get("episodes"),
                 agent_memory_size=int(config.get("agent_memory_size", 100)),
-                update_interval=int(config["update_interval"]),
+                eval_interval=int(config["eval_interval"]),
+                eval_episodes=int(config["eval_episodes"]),
                 league_reroll_interval=int(config["league_reroll_interval"]),
                 starting_stack=float(config.get("starting_stack", 50)),
+                episode_mode=str(config.get("episode_mode", "session")),
                 league_store=self.league,
             )
             if self.slurm.available:
@@ -247,13 +253,15 @@ class CampaignService:
                     job["status"] = status
                 try:
                     run = self.runs.database(job["run_id"]).get_run()
-                except FileNotFoundError:
+                except (FileNotFoundError, sqlite3.Error, OSError):
+                    # Missing, empty, or corrupt run.sqlite should not 500 the list.
                     run = None
                 job["run"] = run
         return campaigns
 
     def stop(self, run_id: str) -> None:
-        job = self.store.get_job(run_id)
+        # Hidden jobs can still have a live worker, so they stay stoppable.
+        job = self.store.get_job(run_id, include_removed=True)
         if not job:
             raise FileNotFoundError(run_id)
         try:
@@ -266,17 +274,57 @@ class CampaignService:
         self.store.update_job(run_id, "STOP_REQUESTED")
 
     def remove(self, run_id: str) -> dict[str, Any]:
-        """Remove campaign controls for a job without deleting its run data."""
-        job = self.store.get_job(run_id)
+        """Stop a job and permanently delete its run data from disk."""
+        job = self.store.get_job(run_id, include_removed=True)
         if not job:
             raise FileNotFoundError(run_id)
+        result = self._delete_job(job)
+        self.store.delete_job(run_id)
+        return result
+
+    def delete_campaign(self, campaign_id: str) -> dict[str, Any]:
+        """Delete every run directory in a campaign, then drop the campaign."""
+        campaign = self.store.get_campaign(campaign_id)
+        if not campaign:
+            raise FileNotFoundError(campaign_id)
+        # Already-hidden jobs still occupy disk, so sweep them up too.
+        jobs = self.store.list_campaign_jobs(campaign_id, include_removed=True)
+        results = [self._delete_job(job) for job in jobs]
+        self.store.delete_campaign(campaign_id)
+        return {
+            "campaign_id": campaign_id,
+            "jobs": len(results),
+            "stopped": sum(1 for item in results if item["stopped"]),
+            "bytes_freed": sum(item["bytes_freed"] for item in results),
+        }
+
+    def _delete_job(self, job: dict[str, Any]) -> dict[str, Any]:
+        run_id = str(job["run_id"])
         stopped = False
         if self._job_is_active(job):
             self.stop(run_id)
             stopped = True
-        if not self.store.remove_job(run_id):
-            raise FileNotFoundError(run_id)
-        return {"run_id": run_id, "stopped": stopped}
+        freed = self.runs.delete_run(run_id)
+        freed += self._delete_scheduler_logs(job.get("scheduler_id"))
+        return {"run_id": run_id, "stopped": stopped, "bytes_freed": freed}
+
+    def _delete_scheduler_logs(self, scheduler_id: Any) -> int:
+        """Remove the Slurm stdout/stderr files that live beside the run folders."""
+        identifier = str(scheduler_id or "")
+        if not identifier.isdigit():
+            return 0
+        freed = 0
+        for suffix in ("out", "err"):
+            path = self.runs.runs_directory / f"slurm-{identifier}.{suffix}"
+            if not path.is_file():
+                continue
+            size = path.stat().st_size
+            try:
+                path.unlink()
+            except OSError:
+                continue
+            freed += size
+        return freed
 
     def stop_campaign(self, campaign_id: str) -> int:
         campaign = next(
@@ -317,8 +365,11 @@ class CampaignService:
             config["seat_configs"] = run_config.get(
                 "seat_configs", config["seat_configs"]
             )
-            config["update_interval"] = int(
-                run_config.get("update_interval", config.get("update_interval", 1))
+            config["eval_interval"] = int(
+                run_config.get("eval_interval", config.get("eval_interval", 0))
+            )
+            config["eval_episodes"] = int(
+                run_config.get("eval_episodes", config.get("eval_episodes", 20))
             )
             config["league_reroll_interval"] = int(
                 run_config.get(
@@ -328,6 +379,9 @@ class CampaignService:
             )
             config["starting_stack"] = float(
                 run_config.get("starting_stack", config.get("starting_stack", 50))
+            )
+            config["episode_mode"] = normalize_episode_mode(
+                run_config.get("episode_mode", config.get("episode_mode", "session"))
             )
         self.runs.clear_stop(run_id)
         if self.slurm.available:
@@ -388,14 +442,18 @@ class CampaignService:
             str(config["seed"]),
             "--checkpoint-interval",
             str(config.get("checkpoint_interval", 100)),
-            "--update-interval",
-            str(config.get("update_interval", 1)),
+            "--eval-interval",
+            str(config.get("eval_interval", 0)),
+            "--eval-episodes",
+            str(config.get("eval_episodes", 20)),
             "--league-reroll-interval",
             str(config.get("league_reroll_interval", 0)),
             "--agent-memory-size",
             str(config.get("agent_memory_size", 100)),
             "--starting-stack",
             str(config.get("starting_stack", 50)),
+            "--episode-mode",
+            str(config.get("episode_mode", "session")),
         ]
         if config.get("seat_configs"):
             command.extend(
@@ -435,6 +493,6 @@ class CampaignService:
             return True
         try:
             run = self.runs.database(str(job["run_id"])).get_run()
-        except FileNotFoundError:
+        except (FileNotFoundError, sqlite3.Error, OSError):
             return False
         return bool(run and str(run.get("status", "")).lower() == "running")

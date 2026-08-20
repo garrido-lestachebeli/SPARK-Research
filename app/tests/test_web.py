@@ -33,7 +33,12 @@ def test_dashboard_serves_statistics_and_full_replay(tmp_path, monkeypatch):
     assert 'id="save-agent-form"' in page.text
     assert 'data-tab="league"' in page.text
     assert 'id="league-create-form"' in page.text
-    assert 'name="update_interval"' in page.text
+    assert 'name="eval_interval"' in page.text
+    assert 'name="eval_episodes"' in page.text
+    assert 'id="eval-chart"' in page.text
+    assert 'id="eval-opponent-lineup"' in page.text
+    assert 'name="starting_stack"' in page.text
+    assert 'name="episode_mode"' in page.text
     assert 'name="league_reroll_interval"' in page.text
     assert 'data-preset="learner-vs-league"' in page.text
     config = client.get("/api/config")
@@ -57,6 +62,7 @@ def test_dashboard_serves_statistics_and_full_replay(tmp_path, monkeypatch):
     stats = client.get("/api/runs/web-test/statistics").json()
     assert stats["episodes"] == 1
     assert "seat_payoffs" in stats
+    assert stats["evaluation"] == {"seats": {}, "rounds": 0, "episodes": 0}
     assert "ci_low" in stats["seat_payoffs"]["0"]
     assert "win_rate" in stats["seat_outcomes"]["0"]
     assert len(stats["seats"]) >= 2
@@ -187,8 +193,18 @@ def test_agent_snapshot_and_job_removal_endpoints(tmp_path, monkeypatch):
     run_id = campaign["jobs"][0]["run_id"]
     removed = client.delete(f"/api/jobs/{run_id}")
     assert removed.status_code == 200
-    assert removed.json()["status"] == "removed"
+    assert removed.json()["status"] == "deleted"
     assert store.list_campaigns()[0]["jobs"] == []
+    assert not (runs.runs_directory / run_id).exists()
+    assert client.delete(f"/api/jobs/{run_id}").status_code == 404
+
+    deleted = client.delete(f"/api/campaigns/{campaign['campaign_id']}")
+    assert deleted.status_code == 200
+    assert deleted.json()["status"] == "deleted"
+    assert store.list_campaigns() == []
+    assert client.delete(f"/api/campaigns/{campaign['campaign_id']}").status_code == 404
+    # The source run belongs to no campaign and must survive.
+    assert (runs.runs_directory / "snapshot-source" / "run.sqlite").exists()
 
 
 def test_league_api_endpoints(tmp_path, monkeypatch):

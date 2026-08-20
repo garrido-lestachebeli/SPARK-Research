@@ -543,7 +543,13 @@ class LeducQAgent(Agent):
                 "alpha": self.alpha,
                 "gamma": self.gamma,
                 "epsilon": self.epsilon,
-                "q_table": {repr(key): values for key, values in self.q.items()},
+                # Compact list-of-pairs form; the old {repr(tuple): values} map
+                # ballooned checkpoints past 100 MB and froze the dashboard
+                # every checkpoint_interval while JSON was written.
+                "q_table": [
+                    [list(key), [float(value) for value in values]]
+                    for key, values in self.q.items()
+                ],
             }
         )
         return state
@@ -556,5 +562,16 @@ class LeducQAgent(Agent):
         self.q.clear()
         self.belief = {}
         self._belief_hand_index = None
-        for key, values in dict(state.get("q_table", {})).items():
-            self.q[tuple(ast.literal_eval(key))] = [float(value) for value in values]
+        raw_table = state.get("q_table", {})
+        if isinstance(raw_table, dict):
+            # Legacy checkpoints keyed by repr(tuple).
+            items = (
+                (tuple(ast.literal_eval(key)), values)
+                for key, values in raw_table.items()
+            )
+        else:
+            items = ((tuple(key), values) for key, values in raw_table)
+        for key, values in items:
+            self.q[tuple(float(part) for part in key)] = [
+                float(value) for value in values
+            ]

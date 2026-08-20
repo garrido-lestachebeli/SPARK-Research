@@ -39,11 +39,13 @@ class SlurmClient:
             "SPARK_CHECKPOINT_INTERVAL": str(
                 int(config.get("checkpoint_interval", 100))
             ),
-            "SPARK_UPDATE_INTERVAL": str(int(config.get("update_interval", 1))),
+            "SPARK_EVAL_INTERVAL": str(int(config.get("eval_interval", 0))),
+            "SPARK_EVAL_EPISODES": str(int(config.get("eval_episodes", 20))),
             "SPARK_LEAGUE_REROLL_INTERVAL": str(
                 int(config.get("league_reroll_interval", 0))
             ),
             "SPARK_STARTING_STACK": str(float(config.get("starting_stack", 50))),
+            "SPARK_EPISODE_MODE": str(config.get("episode_mode", "session")),
             "SPARK_EPISODES": str(config.get("episodes") or ""),
             "SPARK_AGENT_MEMORY_SIZE": str(
                 int(config.get("agent_memory_size", 100))

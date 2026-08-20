@@ -27,10 +27,19 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--checkpoint-interval", type=int, default=100)
     parser.add_argument(
-        "--update-interval",
+        "--eval-interval",
         type=int,
-        default=1,
-        help="Buffer this many episodes, then train on all of them (default 1).",
+        default=0,
+        help=(
+            "Freeze the agent every K episodes and test it against every active "
+            "League member; 0 disables evaluation."
+        ),
+    )
+    parser.add_argument(
+        "--eval-episodes",
+        type=int,
+        default=20,
+        help="Test episodes played against each League member per evaluation round.",
     )
     parser.add_argument(
         "--league-reroll-interval",
@@ -82,6 +91,15 @@ def build_parser() -> argparse.ArgumentParser:
         default=50.0,
         help="Chip buy-in for each seat at the start of a cash-session episode.",
     )
+    parser.add_argument(
+        "--episode-mode",
+        choices=["session", "hand"],
+        default="session",
+        help=(
+            "session = play hands until bust (cash game); "
+            "hand = one poker hand per episode."
+        ),
+    )
     return parser
 
 
@@ -111,12 +129,17 @@ def main() -> None:
             episode_limit=args.episodes,
             shared_agents=not args.separate_seat_agents,
             agent_memory_size=max(0, args.agent_memory_size),
-            update_interval=max(1, args.update_interval),
+            eval_interval=max(0, args.eval_interval),
+            eval_episodes=max(1, args.eval_episodes),
             league_reroll_interval=max(0, args.league_reroll_interval),
             starting_stack=max(1.0, float(args.starting_stack)),
+            episode_mode=args.episode_mode,
         )
     )
     completed = trainer.run(resume=not args.no_resume)
+    # Fold the write-ahead log back into run.sqlite before exiting; a leftover
+    # log makes every later dashboard connection pay to re-validate it.
+    trainer.database.checkpoint_wal()
     print(f"Run {run_id} stopped after {completed} episode(s).")
 
 

@@ -13,7 +13,7 @@ from typing import Any
 
 from spark.agents import Agent, create_agent, default_agent_id
 from spark.environments import create_environment
-from spark.environments.rlcard_poker import DEFAULT_STARTING_STACK
+from spark.environments.rlcard_poker import DEFAULT_EPISODE_MODE, DEFAULT_STARTING_STACK, normalize_episode_mode
 from spark.league import update_ratings
 from spark.models import (
     Episode,
@@ -39,17 +39,29 @@ class TrainerConfig:
     episode_limit: int | None = None
     shared_agents: bool | None = None
     agent_memory_size: int = 100
-    update_interval: int = 1
     league_reroll_interval: int = 0
     starting_stack: float = DEFAULT_STARTING_STACK
+    episode_mode: str = DEFAULT_EPISODE_MODE
+    eval_interval: int = 0
+    eval_episodes: int = 20
+
+
+# Evaluation seeds live far above any plausible training episode number so a
+# test hand is never a replay of a hand the agent already learned from.
+EVAL_SEED_OFFSET = 1_000_000_000
+# Fallback ELO window when evaluation sweeps are disabled. A one-episode window
+# would make every win rate 0.0 or 1.0 and swing ratings by a full K factor.
+DEFAULT_ELO_WINDOW = 100
 
 
 class Trainer:
     def __init__(self, config: TrainerConfig) -> None:
         self.config = config
-        self.config.update_interval = max(1, int(config.update_interval))
         self.config.league_reroll_interval = max(0, int(config.league_reroll_interval))
         self.config.starting_stack = max(1.0, float(config.starting_stack))
+        self.config.episode_mode = normalize_episode_mode(config.episode_mode)
+        self.config.eval_interval = max(0, int(config.eval_interval))
+        self.config.eval_episodes = max(1, int(config.eval_episodes))
         self.run_path = Path(config.run_directory) / config.run_id
         self.run_path.mkdir(parents=True, exist_ok=True)
         self.database = RunDatabase(self.run_path / "run.sqlite")
@@ -57,6 +69,7 @@ class Trainer:
             config.environment,
             config.table_size,
             starting_stack=self.config.starting_stack,
+            episode_mode=self.config.episode_mode,
         )
         self.seat_configs = self._normalize_seat_configs()
         self.agents: dict[int, Agent] = self._create_agents()
@@ -65,9 +78,10 @@ class Trainer:
         self._stop = False
         self._checkpoint_requested = False
         self.checkpoint_path = self.run_path / "checkpoint.json"
-        self._episode_buffer: list[Episode] = []
+        self._elo_buffer: list[Episode] = []
         self.league = LeagueMemberStore(config.run_directory)
         self._reroll_rng = random.Random(config.seed + 17)
+        self._eval_environment: Any | None = None
 
         self.database.create_run(
             config.run_id,
@@ -108,18 +122,22 @@ class Trainer:
         each seat at the next seat modulo n. Re-run after create, league re-roll,
         and checkpoint load so references stay valid.
         """
-        seats = sorted(self.agents)
+        self._wire_opponents_for(self.agents)
+
+    @staticmethod
+    def _wire_opponents_for(agents: dict[int, Agent]) -> None:
+        seats = sorted(agents)
         if not seats:
             return
         if len(seats) == 2:
             left, right = seats
-            self.agents[left].set_opponent(self.agents[right])
-            self.agents[right].set_opponent(self.agents[left])
+            agents[left].set_opponent(agents[right])
+            agents[right].set_opponent(agents[left])
             return
         count = len(seats)
         for index, seat in enumerate(seats):
             other = seats[(index + 1) % count]
-            self.agents[seat].set_opponent(self.agents[other])
+            agents[seat].set_opponent(agents[other])
 
     def _normalize_seat_configs(self) -> list[dict[str, Any]]:
         values = self.config.seat_configs
@@ -162,6 +180,8 @@ class Trainer:
         return normalized
 
     def run(self, *, resume: bool = True) -> int:
+        # Repair empty/partial run.sqlite left behind by a crashed first open.
+        self.database.ensure_schema()
         if resume and self.checkpoint_path.exists():
             self.load_checkpoint()
         self.database.update_run(status="running")
@@ -172,20 +192,23 @@ class Trainer:
                 episode = self.run_episode(self.next_episode_number)
                 # Durably store the experience before exposing it to update().
                 self.database.save_episode(episode)
-                self._episode_buffer.append(episode)
+                self._elo_buffer.append(episode)
                 for agent in self.agents.values():
                     agent.on_episode_end(episode)
 
-                metrics: dict[str, float] = {}
-                if len(self._episode_buffer) >= self.config.update_interval:
-                    metrics = self._flush_update_buffer()
+                metrics = self._train_on_episode(episode)
                 self.database.save_metrics(self.next_episode_number, metrics)
+                if len(self._elo_buffer) >= self._elo_window():
+                    self._flush_elo_buffer()
 
                 self.next_episode_number += 1
                 self.database.update_run(
                     agent_version=self.agent_version,
                     episode_count=self.next_episode_number,
                 )
+
+                if self._should_evaluate():
+                    self._run_evaluation_round()
 
                 if self._should_reroll():
                     self._reroll_league_random_seats()
@@ -198,14 +221,14 @@ class Trainer:
                     self.save_checkpoint()
                     self._checkpoint_requested = False
         except Exception as error:
-            self._flush_update_buffer()
+            self._flush_elo_buffer()
             self._persist_league_training_states()
             self.save_checkpoint()
             self.database.update_run(status="failed")
             self.database.add_event("failed", repr(error))
             raise
 
-        self._flush_update_buffer()
+        self._flush_elo_buffer()
         self._persist_league_training_states()
         self.save_checkpoint()
         final_status = (
@@ -220,29 +243,32 @@ class Trainer:
         )
         return self.next_episode_number
 
-    def _flush_update_buffer(self) -> dict[str, float]:
-        if not self._episode_buffer:
-            return {}
+    def _train_on_episode(self, episode: Episode) -> dict[str, float]:
+        """Learn from a single episode immediately after it is recorded."""
         metrics: dict[str, float] = {}
-        self._update_league_elo_from_buffer()
         updated = False
-        for episode in self._episode_buffer:
-            for seat, agent in self.agents.items():
-                if not agent.training:
-                    continue
-                agent_metrics = agent.update(episode)
-                updated = True
-                metrics.update(
-                    {
-                        f"seat_{seat}.{name}": value
-                        for name, value in agent_metrics.items()
-                    }
-                )
-        self._episode_buffer.clear()
+        for seat, agent in self.agents.items():
+            if not agent.training:
+                continue
+            agent_metrics = agent.update(episode)
+            updated = True
+            metrics.update(
+                {f"seat_{seat}.{name}": value for name, value in agent_metrics.items()}
+            )
         if updated:
             self.agent_version += 1
-            self._persist_league_training_states()
         return metrics
+
+    def _elo_window(self) -> int:
+        interval = self.config.eval_interval
+        return interval if interval > 0 else DEFAULT_ELO_WINDOW
+
+    def _flush_elo_buffer(self) -> None:
+        if not self._elo_buffer:
+            return
+        self._update_league_elo_from_buffer()
+        self._elo_buffer.clear()
+        self._persist_league_training_states()
 
     def _league_member_ids_by_seat(self) -> dict[int, str]:
         mapping: dict[int, str] = {}
@@ -257,7 +283,7 @@ class Trainer:
         member_by_seat = self._league_member_ids_by_seat()
         if len(member_by_seat) < 2:
             return
-        episodes = self._episode_buffer
+        episodes = self._elo_buffer
         if not episodes:
             return
 
@@ -379,25 +405,195 @@ class Trainer:
                     f"Seat {seat} member {member_id}: {error!r}",
                 )
 
+    def _should_evaluate(self) -> bool:
+        interval = self.config.eval_interval
+        if interval <= 0:
+            return False
+        return self.next_episode_number > 0 and self.next_episode_number % interval == 0
+
+    def _evaluation_seats(self) -> list[int]:
+        return [
+            seat
+            for seat, seat_config in enumerate(self.seat_configs)
+            if str(seat_config.get("mode")) == "train"
+        ]
+
+    def _evaluation_environment(self) -> Any:
+        """A dedicated environment so a sweep never disturbs the training table."""
+        if self._eval_environment is None:
+            self._eval_environment = create_environment(
+                self.config.environment,
+                self.config.table_size,
+                starting_stack=self.config.starting_stack,
+                episode_mode=self.config.episode_mode,
+            )
+        return self._eval_environment
+
+    def _frozen_agent(self, agent_id: str, state: dict[str, Any], seat: int) -> Agent:
+        agent = create_agent(
+            agent_id,
+            seed=self.config.seed + seat,
+            config={
+                "memory_size": self.config.agent_memory_size,
+                "training": False,
+                "seat_id": seat,
+            },
+        )
+        agent.load_state_dict(state)
+        agent.seat_id = seat
+        agent.set_training(False)
+        return agent
+
+    def _run_evaluation_round(self) -> None:
+        """Play ``eval_episodes`` frozen test hands against every active League member.
+
+        The live training agent never sits at the table; a frozen clone plays in
+        its place so exploration state, replay buffers, and episode memory are
+        untouched by testing.
+        """
+        seats = self._evaluation_seats()
+        if not seats:
+            return
+        interval = max(1, self.config.eval_interval)
+        round_index = self.next_episode_number // interval
+        try:
+            pool = self.league.list(
+                environment=self.config.environment, status="league"
+            )
+        except Exception as error:
+            self.database.add_event(
+                "evaluation_failed", f"Could not list League members: {error!r}"
+            )
+            return
+
+        environment = self._evaluation_environment()
+        rows: list[dict[str, Any]] = []
+        for seat in seats:
+            own_member_id = self.seat_configs[seat].get("league_member_id")
+            opponents = [
+                member
+                for member in pool
+                if not own_member_id or member["id"] != str(own_member_id)
+            ]
+            if not opponents:
+                self.database.add_event(
+                    "evaluation_skipped",
+                    f"Seat {seat} has no League opponents to test against.",
+                )
+                continue
+            rows.extend(
+                self._evaluate_seat(
+                    seat,
+                    opponents,
+                    environment=environment,
+                    round_index=round_index,
+                )
+            )
+
+        if not rows:
+            return
+        self.database.save_evaluation_episodes(rows)
+        self.database.add_event(
+            "evaluation",
+            (
+                f"Round {round_index} at episode {self.next_episode_number}: "
+                f"{len(rows)} test episode(s) across {len(pool)} League member(s)."
+            ),
+        )
+
+    def _evaluate_seat(
+        self,
+        seat: int,
+        opponents: list[dict[str, Any]],
+        *,
+        environment: Any,
+        round_index: int,
+    ) -> list[dict[str, Any]]:
+        live = self.agents[seat]
+        rows: list[dict[str, Any]] = []
+        other_seats = [index for index in sorted(self.agents) if index != seat]
+        for opponent_index, summary in enumerate(opponents):
+            member_id = str(summary["id"])
+            try:
+                member = self.league.get(member_id)
+                agents = {seat: self._frozen_agent(live.agent_id, live.state_dict(), seat)}
+                for other in other_seats:
+                    agents[other] = self._frozen_agent(
+                        str(member["agent_id"]), dict(member["state"]), other
+                    )
+            except Exception as error:
+                self.database.add_event(
+                    "evaluation_failed",
+                    f"Seat {seat} could not load opponent {member_id}: {error!r}",
+                )
+                continue
+            self._wire_opponents_for(agents)
+            base_seed = (
+                self.config.seed
+                + EVAL_SEED_OFFSET
+                + round_index * 1_000_000
+                + opponent_index * 10_000
+            )
+            for index in range(self.config.eval_episodes):
+                episode = self._play_episode(
+                    environment,
+                    agents,
+                    episode_number=index,
+                    seed=base_seed + index,
+                    agent_version=self.agent_version,
+                )
+                rows.append(
+                    {
+                        "round_index": round_index,
+                        "training_episode": self.next_episode_number,
+                        "agent_version": self.agent_version,
+                        "seat": seat,
+                        "opponent_member_id": member_id,
+                        "opponent_name": str(member.get("name") or member_id),
+                        "opponent_agent_id": str(member["agent_id"]),
+                        "episode_index": index,
+                        "seed": base_seed + index,
+                        "payoff": float(episode.payoffs[seat]),
+                        "outcome": str(episode.outcomes[seat]),
+                    }
+                )
+        return rows
+
     def run_episode(self, episode_number: int) -> Episode:
-        seed = self.config.seed + episode_number
+        return self._play_episode(
+            self.environment,
+            self.agents,
+            episode_number=episode_number,
+            seed=self.config.seed + episode_number,
+            agent_version=self.agent_version,
+        )
+
+    def _play_episode(
+        self,
+        environment: Any,
+        agents: dict[int, Agent],
+        *,
+        episode_number: int,
+        seed: int,
+        agent_version: int,
+    ) -> Episode:
         started = time.perf_counter()
         episode = Episode(
             run_id=self.config.run_id,
             episode_number=episode_number,
             environment=self.config.environment,
             seed=seed,
-            agent_version=self.agent_version,
+            agent_version=agent_version,
         )
-        for agent in self.agents.values():
+        for agent in agents.values():
             agent.on_episode_start(episode_number)
 
-        decision = self.environment.reset(seed)
+        decision = environment.reset(seed)
         while decision is not None:
             # Only this value is passed to the agent. Hidden state is logged separately.
             visible_before = decision.observation
-            hidden_before = self.environment.hidden_state()
-            agent = self.agents[decision.player_id]
+            hidden_before = environment.hidden_state()
+            agent = agents[decision.player_id]
             action = agent.select_action(
                 visible_before,
                 list(decision.legal_actions),
@@ -409,24 +605,24 @@ class Trainer:
                 )
             player_id = decision.player_id
             legal_actions = list(decision.legal_actions)
-            next_decision = self.environment.step(action)
+            next_decision = environment.step(action)
             episode.steps.append(
                 EpisodeStep(
                     index=len(episode.steps),
                     player_id=player_id,
-                    agent_version=self.agent_version,
+                    agent_version=agent_version,
                     action=action,
-                    action_name=self.environment.action_name(action),
+                    action_name=environment.action_name(action),
                     legal_actions=legal_actions,
                     visible_before=visible_before,
                     visible_after=next_decision.observation if next_decision else {},
                     hidden_before=hidden_before,
-                    hidden_after=self.environment.hidden_state(),
+                    hidden_after=environment.hidden_state(),
                 )
             )
             decision = next_decision
 
-        episode.payoffs = self.environment.payoffs()
+        episode.payoffs = environment.payoffs()
         episode.outcomes = outcomes_from_payoffs(episode.payoffs)
         episode.winner = winner_from_payoffs(episode.payoffs)
         episode.completed_at = utc_now()
@@ -489,15 +685,26 @@ class Trainer:
             agent.set_training(self.seat_configs[seat]["mode"] == "train")
         self._wire_opponents()
         saved_config = dict(payload.get("config") or {})
-        if "update_interval" in saved_config:
-            self.config.update_interval = max(1, int(saved_config["update_interval"]))
+        if "eval_interval" in saved_config:
+            self.config.eval_interval = max(0, int(saved_config["eval_interval"]))
+        if "eval_episodes" in saved_config:
+            self.config.eval_episodes = max(1, int(saved_config["eval_episodes"]))
         if "league_reroll_interval" in saved_config:
             self.config.league_reroll_interval = max(
                 0, int(saved_config["league_reroll_interval"])
             )
         if "starting_stack" in saved_config:
             self.config.starting_stack = max(1.0, float(saved_config["starting_stack"]))
-            self.environment.starting_stack = self.config.starting_stack
+        if "episode_mode" in saved_config:
+            self.config.episode_mode = normalize_episode_mode(saved_config["episode_mode"])
+        if "starting_stack" in saved_config or "episode_mode" in saved_config:
+            self.environment = create_environment(
+                self.config.environment,
+                self.config.table_size,
+                starting_stack=self.config.starting_stack,
+                episode_mode=self.config.episode_mode,
+            )
+            self._eval_environment = None
         self.database.add_event(
             "resumed", f"Loaded checkpoint at episode {self.next_episode_number}."
         )

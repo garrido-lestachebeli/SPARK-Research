@@ -60,9 +60,11 @@ class CampaignRequest(BaseModel):
     seed: int = 0
     episodes: int | None = Field(default=None, ge=1)
     checkpoint_interval: int = Field(default=100, ge=1)
-    update_interval: int = Field(default=1, ge=1)
+    eval_interval: int = Field(default=0, ge=0)
+    eval_episodes: int = Field(default=20, ge=1)
     league_reroll_interval: int = Field(default=0, ge=0)
     starting_stack: float = Field(default=50.0, ge=1)
+    episode_mode: Literal["session", "hand"] = "session"
     partition: str | None = None
     cpus: int = Field(default=1, ge=1, le=256)
     memory: str = "4G"
@@ -330,6 +332,17 @@ def resume_campaign(campaign_id: str) -> dict[str, Any]:
     return {"status": "requeued", "scheduler_ids": job_ids}
 
 
+@app.delete("/api/campaigns/{campaign_id}")
+def delete_campaign(campaign_id: str) -> dict[str, Any]:
+    try:
+        result = campaigns.delete_campaign(campaign_id)
+    except FileNotFoundError as error:
+        raise HTTPException(status_code=404, detail="Campaign not found.") from error
+    except (RuntimeError, ValueError) as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    return {"status": "deleted", **result}
+
+
 @app.post("/api/jobs/{run_id}/stop")
 def stop_job(run_id: str) -> dict[str, str]:
     try:
@@ -345,7 +358,9 @@ def remove_job(run_id: str) -> dict[str, Any]:
         result = campaigns.remove(run_id)
     except FileNotFoundError as error:
         raise HTTPException(status_code=404, detail="Job not found.") from error
-    return {"status": "removed", **result}
+    except (RuntimeError, ValueError) as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    return {"status": "deleted", **result}
 
 
 @app.post("/api/jobs/{run_id}/resume")

@@ -22,10 +22,12 @@ args=(
   --run-directory "${SPARK_RUNS_DIRECTORY:-data}"
   --seed "${SPARK_SEED:-0}"
   --checkpoint-interval "${SPARK_CHECKPOINT_INTERVAL:-100}"
-  --update-interval "${SPARK_UPDATE_INTERVAL:-1}"
+  --eval-interval "${SPARK_EVAL_INTERVAL:-0}"
+  --eval-episodes "${SPARK_EVAL_EPISODES:-20}"
   --league-reroll-interval "${SPARK_LEAGUE_REROLL_INTERVAL:-0}"
   --agent-memory-size "${SPARK_AGENT_MEMORY_SIZE:-100}"
   --starting-stack "${SPARK_STARTING_STACK:-50}"
+  --episode-mode "${SPARK_EPISODE_MODE:-session}"
 )
 if [[ -n "${SPARK_SEAT_CONFIG_B64:-}" ]]; then
   args+=(--seat-config-b64 "${SPARK_SEAT_CONFIG_B64}")

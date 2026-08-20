@@ -1,6 +1,7 @@
 from app.services.campaigns import CampaignService
 from app.services.dashboard_store import DashboardStore
 from app.services.runs import RunsService
+from spark.storage import RunDatabase
 from spark.training.trainer import Trainer, TrainerConfig
 
 
@@ -20,6 +21,32 @@ class FakeSlurm:
 
     def cancel(self, job_id):
         self.cancelled.append(job_id)
+
+
+def test_refresh_tolerates_empty_run_database(tmp_path):
+    import sqlite3
+
+    store = DashboardStore(tmp_path / "dashboard.sqlite")
+    runs = RunsService(tmp_path / "runs")
+    service = CampaignService(tmp_path, runs, store)
+    service.slurm = FakeSlurm()
+    result = service.create(
+        {
+            "name": "broken-db",
+            "environments": ["leduc-holdem"],
+            "seed": 1,
+        }
+    )
+    run_id = result["jobs"][0]["run_id"]
+    db_path = runs.runs_directory / run_id / "run.sqlite"
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    sqlite3.connect(db_path).close()
+
+    assert RunDatabase(db_path, initialize=False).get_run() is None
+    campaigns = service.refresh()
+    assert len(campaigns) == 1
+    assert campaigns[0]["jobs"][0]["run_id"] == run_id
+    assert campaigns[0]["jobs"][0]["run"] is None
 
 
 def test_campaign_submits_one_job_per_environment_and_cancels(tmp_path):
@@ -56,7 +83,7 @@ def test_campaign_submits_one_job_per_environment_and_cancels(tmp_path):
     assert fake.cancelled == ["10001", "10002"]
 
 
-def test_remove_job_keeps_run_data_and_campaign_label(tmp_path):
+def test_remove_job_deletes_run_storage(tmp_path):
     store = DashboardStore(tmp_path / "dashboard.sqlite")
     runs = RunsService(tmp_path / "runs")
     service = CampaignService(tmp_path, runs, store)
@@ -64,7 +91,7 @@ def test_remove_job_keeps_run_data_and_campaign_label(tmp_path):
     service.slurm = fake
     result = service.create(
         {
-            "name": "keep-history",
+            "name": "reclaim-space",
             "environments": ["leduc-holdem"],
             "seed": 7,
         }
@@ -78,14 +105,87 @@ def test_remove_job_keeps_run_data_and_campaign_label(tmp_path):
             episode_limit=1,
         )
     ).run()
+    # Slurm stdout/stderr live beside the run folders and should go too.
+    (runs.runs_directory / "slurm-10001.out").write_text("log", encoding="utf-8")
+    (runs.runs_directory / "slurm-10001.err").write_text("log", encoding="utf-8")
 
     removed = service.remove(run_id)
-    assert removed == {"run_id": run_id, "stopped": True}
+    assert removed["run_id"] == run_id
+    assert removed["stopped"] is True
+    assert removed["bytes_freed"] > 0
+    assert not (runs.runs_directory / run_id).exists()
+    assert not (runs.runs_directory / "slurm-10001.out").exists()
+    assert not (runs.runs_directory / "slurm-10001.err").exists()
     assert store.list_campaigns()[0]["jobs"] == []
-    assert store.run_campaign_metadata()[run_id]["campaign_name"] == "keep-history"
-    assert (runs.runs_directory / run_id / "run.sqlite").exists()
-    assert runs.list_runs()[0]["id"] == run_id
+    assert run_id not in store.run_campaign_metadata()
+    assert runs.list_runs() == []
     assert fake.cancelled == ["10001"]
+
+
+def test_delete_campaign_removes_every_run_including_hidden_jobs(tmp_path):
+    store = DashboardStore(tmp_path / "dashboard.sqlite")
+    runs = RunsService(tmp_path / "runs")
+    service = CampaignService(tmp_path, runs, store)
+    service.slurm = FakeSlurm()
+    result = service.create(
+        {
+            "name": "big-campaign",
+            "environments": ["leduc-holdem", "limit-holdem"],
+            "seed": 3,
+        }
+    )
+    run_ids = [job["run_id"] for job in result["jobs"]]
+    for run_id, environment in zip(run_ids, ["leduc-holdem", "limit-holdem"]):
+        Trainer(
+            TrainerConfig(
+                run_id=run_id,
+                environment=environment,
+                run_directory=str(runs.runs_directory),
+                episode_limit=1,
+            )
+        ).run()
+    # A job hidden by an older build still occupies disk and must be swept up.
+    with store.connect() as connection:
+        connection.execute(
+            "UPDATE jobs SET removed = 1 WHERE run_id = ?", (run_ids[1],)
+        )
+    assert len(store.list_campaigns()[0]["jobs"]) == 1
+
+    summary = service.delete_campaign(result["campaign_id"])
+    assert summary["jobs"] == 2
+    assert summary["bytes_freed"] > 0
+    assert all(not (runs.runs_directory / run_id).exists() for run_id in run_ids)
+    assert store.list_campaigns() == []
+    assert store.run_campaign_metadata() == {}
+    assert runs.list_runs() == []
+
+
+def test_delete_campaign_rejects_unknown_id(tmp_path):
+    import pytest
+
+    store = DashboardStore(tmp_path / "dashboard.sqlite")
+    runs = RunsService(tmp_path / "runs")
+    service = CampaignService(tmp_path, runs, store)
+    with pytest.raises(FileNotFoundError):
+        service.delete_campaign("campaign-missing")
+
+
+def test_delete_run_rejects_path_traversal(tmp_path):
+    import pytest
+
+    runs = RunsService(tmp_path / "runs")
+    keep = tmp_path / "keep.txt"
+    keep.write_text("important", encoding="utf-8")
+    for candidate in ["..", "../..", "a/../..", "", "with space"]:
+        with pytest.raises(ValueError):
+            runs.delete_run(candidate)
+    assert keep.exists()
+    assert runs.runs_directory.exists()
+
+
+def test_delete_run_is_a_no_op_for_a_missing_directory(tmp_path):
+    runs = RunsService(tmp_path / "runs")
+    assert runs.delete_run("never-existed") == 0
 
 
 def test_campaign_materializes_selected_agent_snapshot(tmp_path):
@@ -126,7 +226,7 @@ def test_campaign_materializes_selected_agent_snapshot(tmp_path):
                 }
             },
             "seed": 9,
-            "update_interval": 5,
+            "eval_interval": 5,
             "league_reroll_interval": 0,
         }
     )
@@ -135,7 +235,7 @@ def test_campaign_materializes_selected_agent_snapshot(tmp_path):
     assert checkpoint.exists()
     assert fake.submitted[0]["seat_configs"][0]["snapshot_id"] == snapshot["id"]
     assert fake.submitted[0]["seat_configs"][1]["mode"] == "evaluate"
-    assert fake.submitted[0]["update_interval"] == 5
+    assert fake.submitted[0]["eval_interval"] == 5
 
 
 def test_campaign_resolves_league_random_and_rejects_empty_pool(tmp_path):

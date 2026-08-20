@@ -1,9 +1,11 @@
 """RLCard poker adapter with strict observable/hidden-state separation.
 
-An episode is a cash session: players start with a shared chip stack and keep
-playing hands until someone can no longer post the big blind (bust), or a
-safety max-hand limit is hit. Terminal payoffs are net chip change over the
-session so agents can learn multi-hand play style.
+Episode modes:
+
+- ``session`` (default): cash session — play hands until someone cannot post
+  the big blind (bust), or a safety max-hand limit is hit. Terminal payoffs
+  are net chip change over the session.
+- ``hand``: one hand per episode. Terminal payoffs are that hand's net chips.
 """
 
 from __future__ import annotations
@@ -21,6 +23,29 @@ LIMIT_ACTIONS = {0: "call", 1: "raise", 2: "fold", 3: "check"}
 # large enough for several hands of play-style signal before someone busts.
 DEFAULT_STARTING_STACK = 50.0
 DEFAULT_MAX_HANDS = 500
+EPISODE_MODES = ("session", "hand")
+DEFAULT_EPISODE_MODE = "session"
+
+
+def normalize_episode_mode(value: Any) -> str:
+    """Map UI / config aliases onto ``session`` or ``hand``."""
+    raw = str(value or DEFAULT_EPISODE_MODE).strip().lower().replace("-", "_")
+    aliases = {
+        "session": "session",
+        "play_until_bust": "session",
+        "until_bust": "session",
+        "cash": "session",
+        "hand": "hand",
+        "single_hand": "hand",
+        "hand_only": "hand",
+        "one_hand": "hand",
+    }
+    mode = aliases.get(raw)
+    if mode is None:
+        raise ValueError(
+            f"Unknown episode_mode {value!r}; expected one of {EPISODE_MODES}."
+        )
+    return mode
 
 
 def jsonify(value: Any) -> Any:
@@ -59,10 +84,13 @@ class RLCardPokerAdapter(EnvironmentAdapter):
         *,
         starting_stack: float = DEFAULT_STARTING_STACK,
         max_hands: int = DEFAULT_MAX_HANDS,
+        episode_mode: str = DEFAULT_EPISODE_MODE,
     ) -> None:
         self.num_players = int(num_players)
         self.starting_stack = float(starting_stack)
-        self.max_hands = max(1, int(max_hands))
+        self.episode_mode = normalize_episode_mode(episode_mode)
+        # Single-hand mode always ends after the first hand, regardless of stack.
+        self.max_hands = 1 if self.episode_mode == "hand" else max(1, int(max_hands))
         self._env = None
         self._state: dict[str, Any] | None = None
         self._player_id = 0
@@ -118,6 +146,7 @@ class RLCardPokerAdapter(EnvironmentAdapter):
                 "stacks": list(self._stacks),
                 "hand_index": self._hand_index,
                 "starting_stack": self.starting_stack,
+                "episode_mode": self.episode_mode,
             }
         try:
             info = dict(self._env.get_perfect_information())
@@ -134,6 +163,7 @@ class RLCardPokerAdapter(EnvironmentAdapter):
         info["hand_index"] = self._hand_index
         info["starting_stack"] = self.starting_stack
         info["big_blind"] = self._big_blind
+        info["episode_mode"] = self.episode_mode
         return info
 
     def _start_hand(self) -> Decision:
@@ -151,6 +181,8 @@ class RLCardPokerAdapter(EnvironmentAdapter):
         return self._decision(self._state, self._player_id)
 
     def _session_should_end(self) -> bool:
+        if self.episode_mode == "hand":
+            return True
         if self._hand_index + 1 >= self.max_hands:
             return True
         # Bust = cannot post the next big blind.
@@ -167,6 +199,7 @@ class RLCardPokerAdapter(EnvironmentAdapter):
             "hand_index": self._hand_index,
             "starting_stack": self.starting_stack,
             "big_blind": self._big_blind,
+            "episode_mode": self.episode_mode,
         }
         return Decision(
             player_id=int(player_id),

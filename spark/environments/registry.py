@@ -57,6 +57,7 @@ def create_environment(
     *,
     starting_stack: float | None = None,
     max_hands: int | None = None,
+    episode_mode: str | None = None,
 ) -> EnvironmentAdapter:
     info = _INFO.get(environment_id)
     if info is None:
@@ -70,11 +71,13 @@ def create_environment(
         raise ValueError(
             f"{environment_id} supports {info.min_players}-{info.max_players} players."
         )
-    kwargs: dict[str, float | int] = {}
+    kwargs: dict[str, float | int | str] = {}
     if starting_stack is not None:
         kwargs["starting_stack"] = float(starting_stack)
     if max_hands is not None:
         kwargs["max_hands"] = int(max_hands)
+    if episode_mode is not None:
+        kwargs["episode_mode"] = str(episode_mode)
     return _FACTORIES[environment_id](table_size, **kwargs)
 
 

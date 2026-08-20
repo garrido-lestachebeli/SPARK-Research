@@ -60,9 +60,29 @@ def test_leduc_episode_continues_across_hands_until_bust():
         steps += 1
         assert steps < 20_000
     assert environment.done
+    assert environment.episode_mode == "session"
     assert any(stack < environment._big_blind for stack in environment._stacks)
     assert abs(sum(environment.payoffs())) < 1e-6
     assert max(hands) >= 0
+
+
+def test_leduc_hand_mode_ends_after_one_hand():
+    environment = LeducAdapter(2, starting_stack=50, episode_mode="hand")
+    decision = environment.reset(11)
+    hands = set()
+    while decision is not None:
+        hands.add(int(decision.observation["hand_index"]))
+        assert decision.observation["episode_mode"] == "hand"
+        decision = environment.step(decision.legal_actions[0])
+    assert environment.done
+    assert hands == {0}
+    assert abs(sum(environment.payoffs())) < 1e-6
+
+
+def test_create_environment_accepts_episode_mode():
+    environment = create_environment("leduc-holdem", 2, episode_mode="single_hand")
+    assert environment.episode_mode == "hand"
+    assert environment.max_hands == 1
 
 
 @pytest.mark.parametrize(

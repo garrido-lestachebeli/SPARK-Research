@@ -112,7 +112,16 @@ class Agent(ABC):
         """Remember a completed episode; learning algorithms can override this hook."""
         self.episodes_seen += 1
         if self.memory_size:
-            self.episode_memory.append(episode.to_dict())
+            # Keep a compact summary only — full step trajectories already live
+            # in run.sqlite and were making training RAM grow without bound.
+            self.episode_memory.append(
+                {
+                    "episode_number": episode.episode_number,
+                    "payoffs": list(episode.payoffs),
+                    "outcomes": list(episode.outcomes),
+                    "winner": episode.winner,
+                }
+            )
             del self.episode_memory[:-self.memory_size]
         return {}
 
@@ -123,6 +132,9 @@ class Agent(ABC):
         del episode
 
     def state_dict(self) -> dict[str, Any]:
+        # Episode trajectories already live in run.sqlite. Serializing them into
+        # every checkpoint/league member bloated files to hundreds of MB and made
+        # the dashboard freeze while the worker wrote or reloaded them.
         return {
             "agent_id": self.agent_id,
             "agent_name": self.name,
@@ -131,7 +143,7 @@ class Agent(ABC):
             "seed": self.seed,
             "memory_size": self.memory_size,
             "seat_id": self.seat_id,
-            "episode_memory": self.episode_memory,
+            "episode_memory": [],
             "episodes_seen": self.episodes_seen,
             "training": self.training,
             "random_state": repr(self._random.getstate()),

@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from spark.models import utc_now
+from spark.storage.database import ScopedConnection
 
 
 class DashboardStore:
@@ -47,7 +48,9 @@ class DashboardStore:
                 )
 
     def connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(self.path, timeout=30)
+        connection = sqlite3.connect(
+            self.path, timeout=30, factory=ScopedConnection
+        )
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA foreign_keys=ON")
         return connection
@@ -145,23 +148,37 @@ class DashboardStore:
             for row in rows
         }
 
-    def get_job(self, run_id: str) -> dict[str, Any] | None:
+    def get_job(
+        self, run_id: str, *, include_removed: bool = False
+    ) -> dict[str, Any] | None:
+        clause = "" if include_removed else " AND removed = 0"
         with self.connect() as connection:
             row = connection.execute(
-                "SELECT * FROM jobs WHERE run_id = ? AND removed = 0", (run_id,)
+                f"SELECT * FROM jobs WHERE run_id = ?{clause}", (run_id,)
             ).fetchone()
         return dict(row) if row else None
 
-    def remove_job(self, run_id: str) -> bool:
-        """Hide a job from campaign controls while preserving its run association."""
+    def list_campaign_jobs(
+        self, campaign_id: str, *, include_removed: bool = False
+    ) -> list[dict[str, Any]]:
+        clause = "" if include_removed else " AND removed = 0"
         with self.connect() as connection:
+            rows = connection.execute(
+                f"SELECT * FROM jobs WHERE campaign_id = ?{clause}", (campaign_id,)
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def delete_job(self, run_id: str) -> bool:
+        """Drop a job row outright. Callers delete the run directory separately."""
+        with self.connect() as connection:
+            cursor = connection.execute("DELETE FROM jobs WHERE run_id = ?", (run_id,))
+        return cursor.rowcount > 0
+
+    def delete_campaign(self, campaign_id: str) -> bool:
+        with self.connect() as connection:
+            connection.execute("DELETE FROM jobs WHERE campaign_id = ?", (campaign_id,))
             cursor = connection.execute(
-                """
-                UPDATE jobs
-                SET removed = 1, status = 'REMOVED', updated_at = ?
-                WHERE run_id = ? AND removed = 0
-                """,
-                (utc_now(), run_id),
+                "DELETE FROM campaigns WHERE id = ?", (campaign_id,)
             )
         return cursor.rowcount > 0
 
