@@ -35,7 +35,9 @@ class RunsService:
         path = self.runs_directory / run_id / "run.sqlite"
         if not path.exists():
             raise FileNotFoundError(run_id)
-        return RunDatabase(path, initialize=False)
+        # Migrate compact episode-metadata columns on older run files so the
+        # overview panels keep working after the no-step-log change.
+        return RunDatabase(path, initialize=True)
 
     def statistics(self, run_id: str) -> dict[str, Any]:
         database = self.database(run_id)

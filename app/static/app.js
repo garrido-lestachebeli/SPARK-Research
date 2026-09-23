@@ -1637,7 +1637,25 @@ function replayFrame() {
 function renderReplay() {
   const episode = state.episode;
   const frame = replayFrame();
-  if (!episode || !frame) return;
+  if (!episode) return;
+  if (!frame) {
+    $("#timeline").value = 0;
+    $("#timeline").max = 0;
+    $("#timeline-label").textContent = "0 / 0";
+    $("#action-banner").textContent =
+      "Episode metadata only — full step logs are not stored (saves disk). Overview stats still use payoffs, outcomes, and action tallies.";
+    $("#visible-json").textContent = json({
+      payoffs: episode.payoffs,
+      outcomes: episode.outcomes,
+      winner: episode.winner,
+      seed: episode.seed,
+    });
+    $("#hidden-json").textContent = "{}";
+    $("#raw-json").textContent = "{}";
+    $("#pot-amount").textContent = "—";
+    $("#replay-players").innerHTML = "";
+    return;
+  }
   $("#timeline").value = state.step;
   $("#timeline-label").textContent = `${state.step} / ${episode.steps.length}`;
   $("#visible-json").textContent = json(frame.visible);

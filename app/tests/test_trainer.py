@@ -18,15 +18,12 @@ def config(directory: Path, run_id: str, episodes: int) -> TrainerConfig:
     )
 
 
-def episode_actions(database: RunDatabase) -> list[list[int]]:
+def episode_payoffs(database: RunDatabase) -> list[list[float]]:
     summaries = sorted(database.list_episodes(limit=100), key=lambda item: item["episode_number"])
-    return [
-        [step.action for step in database.get_episode(item["id"]).steps]
-        for item in summaries
-    ]
+    return [list(item["payoffs"]) for item in summaries]
 
 
-def test_agent_updates_after_every_episode_and_hidden_state_is_recorded(tmp_path):
+def test_agent_updates_after_every_episode_and_metadata_is_recorded(tmp_path):
     trainer = Trainer(config(tmp_path, "online", 3))
     trainer.run()
 
@@ -37,9 +34,16 @@ def test_agent_updates_after_every_episode_and_hidden_state_is_recorded(tmp_path
     assert trainer.agents[0].episodes_seen == 3
     assert len(trainer.agents[0].episode_memory) == 3
 
-    episode = database.get_episode(database.list_episodes(limit=1)[0]["id"])
-    assert episode.steps[0].hidden_before["hand_cards"]
-    assert "hand_cards" not in episode.steps[0].visible_before
+    summary = database.list_episodes(limit=1)[0]
+    assert summary["step_count"] > 0
+    assert len(summary["payoffs"]) == 2
+    episode = database.get_episode(summary["id"])
+    # Observation logs are intentionally not persisted; replay has no frames.
+    assert episode.steps == []
+    stats = database.statistics()
+    assert stats["episodes"] == 3
+    assert stats["average_steps"] > 0
+    assert stats["actions"]
 
 
 def test_checkpoint_resume_matches_uninterrupted_random_agent(tmp_path):
@@ -58,7 +62,7 @@ def test_checkpoint_resume_matches_uninterrupted_random_agent(tmp_path):
 
     baseline_db = RunDatabase(tmp_path / "baseline" / "run.sqlite", initialize=False)
     resumed_db = RunDatabase(tmp_path / "resumed" / "run.sqlite", initialize=False)
-    assert episode_actions(baseline_db) == episode_actions(resumed_db)
+    assert episode_payoffs(baseline_db) == episode_payoffs(resumed_db)
 
 
 def test_separate_seat_agents_are_configurable(tmp_path):

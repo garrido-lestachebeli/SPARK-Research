@@ -39,6 +39,8 @@ CREATE TABLE IF NOT EXISTS episodes (
     outcomes_json TEXT NOT NULL,
     winner INTEGER,
     schema_version INTEGER NOT NULL,
+    step_count INTEGER NOT NULL DEFAULT 0,
+    actions_json TEXT NOT NULL DEFAULT '{}',
     UNIQUE(run_id, episode_number)
 );
 CREATE TABLE IF NOT EXISTS steps (
@@ -140,6 +142,7 @@ class RunDatabase:
         with self.connect() as connection:
             connection.executescript(SCHEMA_SQL)
             self._migrate_legacy_schema(connection)
+            self._migrate_episode_metadata(connection)
 
     def connect(self, *, readonly: bool = False) -> sqlite3.Connection:
         if readonly:
@@ -211,6 +214,19 @@ class RunDatabase:
                     columns.remove(old)
                     columns.add(new)
 
+    @classmethod
+    def _migrate_episode_metadata(cls, connection: sqlite3.Connection) -> None:
+        """Add compact per-episode tallies used when full step logs are not stored."""
+        columns = cls._columns(connection, "episodes")
+        if "step_count" not in columns:
+            connection.execute(
+                "ALTER TABLE episodes ADD COLUMN step_count INTEGER NOT NULL DEFAULT 0"
+            )
+        if "actions_json" not in columns:
+            connection.execute(
+                "ALTER TABLE episodes ADD COLUMN actions_json TEXT NOT NULL DEFAULT '{}'"
+            )
+
     def create_run(
         self,
         run_id: str,
@@ -268,14 +284,21 @@ class RunDatabase:
         return bool(run and run["stop_requested"])
 
     def save_episode(self, episode: Episode) -> int:
+        """Persist episode outcomes and compact tallies without per-step observations.
+
+        Full step rows (visible/hidden JSON) dominate run.sqlite size and are only
+        needed for the replay tab. Overview statistics use payoffs, outcomes,
+        durations, ``step_count``, and ``actions_json`` instead.
+        """
+        action_counts = self._action_counts(episode.steps)
         with self.connect() as connection:
             cursor = connection.execute(
                 """
                 INSERT INTO episodes (
                     run_id, episode_number, environment, seed, agent_version,
                     started_at, completed_at, duration_seconds, payoffs_json,
-                    outcomes_json, winner, schema_version
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    outcomes_json, winner, schema_version, step_count, actions_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     episode.run_id,
@@ -290,34 +313,11 @@ class RunDatabase:
                     json.dumps(episode.outcomes),
                     episode.winner,
                     episode.schema_version,
+                    len(episode.steps),
+                    json.dumps(action_counts),
                 ),
             )
             episode_id = int(cursor.lastrowid)
-            connection.executemany(
-                """
-                INSERT INTO steps (
-                    episode_id, step_index, player_id, agent_version, action,
-                    action_name, legal_actions_json, visible_before_json,
-                    visible_after_json, hidden_before_json, hidden_after_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                [
-                    (
-                        episode_id,
-                        step.index,
-                        step.player_id,
-                        step.agent_version,
-                        step.action,
-                        step.action_name,
-                        json.dumps(step.legal_actions),
-                        json.dumps(step.visible_before),
-                        json.dumps(step.visible_after),
-                        json.dumps(step.hidden_before),
-                        json.dumps(step.hidden_after),
-                    )
-                    for step in episode.steps
-                ],
-            )
             connection.execute(
                 """
                 UPDATE runs
@@ -334,6 +334,17 @@ class RunDatabase:
                 ),
             )
         return episode_id
+
+    @staticmethod
+    def _action_counts(steps: list[EpisodeStep]) -> dict[str, dict[str, int]]:
+        """Collapse a step list into ``{seat: {action_name: count}}`` tallies."""
+        counts: dict[str, dict[str, int]] = {}
+        for step in steps:
+            seat = str(step.player_id)
+            by_action = counts.setdefault(seat, {})
+            name = str(step.action_name)
+            by_action[name] = by_action.get(name, 0) + 1
+        return counts
 
     def list_episodes(
         self,
@@ -354,13 +365,21 @@ class RunDatabase:
                 if "agent_version" in self._columns(connection, "episodes")
                 else "policy_version"
             )
+            # Prefer the compact step_count column; fall back to counting legacy
+            # step rows for databases written before metadata-only persistence.
             rows = connection.execute(
                 f"""
                 SELECT id, run_id, episode_number, environment, seed,
                        {version_column} AS agent_version,
                        started_at, completed_at, duration_seconds, payoffs_json,
                        outcomes_json, winner,
-                       (SELECT COUNT(*) FROM steps WHERE episode_id = episodes.id) AS step_count
+                       CASE
+                           WHEN COALESCE(step_count, 0) > 0 THEN step_count
+                           ELSE (
+                               SELECT COUNT(*) FROM steps
+                               WHERE episode_id = episodes.id
+                           )
+                       END AS step_count
                 FROM episodes {where}
                 ORDER BY episode_number DESC LIMIT ? OFFSET ?
                 """,
@@ -402,6 +421,7 @@ class RunDatabase:
             outcomes=json.loads(episode_row["outcomes_json"]),
             winner=episode_row["winner"],
             schema_version=episode_row["schema_version"],
+            # New runs omit step rows on purpose; legacy DBs may still have them.
             steps=[
                 EpisodeStep(
                     index=row["step_index"],
@@ -426,40 +446,55 @@ class RunDatabase:
                 if "agent_version" in self._columns(connection, "episodes")
                 else "policy_version"
             )
-            # Overview polling must stay on the episodes table only. Touching
-            # ``steps`` (hundreds of thousands of rows per cash-session run)
-            # made every dashboard refresh hang for tens of seconds and stacked
-            # requests until the page appeared frozen.
+            # Overview polling stays on the episodes table. Compact action
+            # tallies and step_count live there so we never scan the steps
+            # table (which can be enormous on older runs that logged every
+            # observation).
             payoff_rows = connection.execute(
                 f"""
                 SELECT episode_number, {version_column} AS agent_version,
-                       duration_seconds, payoffs_json, outcomes_json
+                       duration_seconds, payoffs_json, outcomes_json,
+                       COALESCE(step_count, 0) AS step_count,
+                       COALESCE(actions_json, '{{}}') AS actions_json
                 FROM episodes
                 ORDER BY episode_number
                 """
             ).fetchall()
-            # Cheap approximate action mix: sample recent steps only.
-            action_rows = connection.execute(
-                """
-                SELECT action_name, player_id, COUNT(*) AS count
-                FROM steps
-                WHERE episode_id IN (
-                    SELECT id FROM episodes ORDER BY episode_number DESC LIMIT 50
-                )
-                GROUP BY action_name, player_id
-                ORDER BY action_name, player_id
-                """
-            ).fetchall()
-            length_rows = connection.execute(
-                """
-                SELECT COUNT(*) AS step_count
-                FROM steps
-                WHERE episode_id IN (
-                    SELECT id FROM episodes ORDER BY episode_number DESC LIMIT 50
-                )
-                GROUP BY episode_id
-                """
-            ).fetchall()
+            # Legacy fallback: only touch steps when metadata is empty but
+            # observation rows still exist (pre-metadata-only databases).
+            recent = payoff_rows[-50:]
+            has_action_metadata = any(
+                json.loads(row["actions_json"] or "{}") for row in recent
+            )
+            has_length_metadata = any(int(row["step_count"] or 0) > 0 for row in recent)
+            action_rows: list[Any] = []
+            length_rows: list[Any] = []
+            if payoff_rows and (not has_action_metadata or not has_length_metadata):
+                if not has_action_metadata:
+                    action_rows = connection.execute(
+                        """
+                        SELECT action_name, player_id, COUNT(*) AS count
+                        FROM steps
+                        WHERE episode_id IN (
+                            SELECT id FROM episodes
+                            ORDER BY episode_number DESC LIMIT 50
+                        )
+                        GROUP BY action_name, player_id
+                        ORDER BY action_name, player_id
+                        """
+                    ).fetchall()
+                if not has_length_metadata:
+                    length_rows = connection.execute(
+                        """
+                        SELECT COUNT(*) AS step_count
+                        FROM steps
+                        WHERE episode_id IN (
+                            SELECT id FROM episodes
+                            ORDER BY episode_number DESC LIMIT 50
+                        )
+                        GROUP BY episode_id
+                        """
+                    ).fetchall()
 
         seat_payoffs: dict[int, list[float]] = {}
         outcome_counts: dict[int, dict[str, int]] = {}
@@ -468,15 +503,25 @@ class RunDatabase:
         recent_by_seat: dict[int, list[float]] = {}
         recent_sum_by_seat: dict[int, float] = {}
         cumulative_by_seat: dict[int, float] = {}
+        action_totals: dict[tuple[str, int], int] = {}
+        metadata_step_counts: list[float] = []
         for row in payoff_rows:
             payoffs = [float(value) for value in json.loads(row["payoffs_json"])]
             outcomes = json.loads(row["outcomes_json"])
             durations.append(float(row["duration_seconds"] or 0))
+            step_count = int(row["step_count"] or 0)
+            if step_count > 0:
+                metadata_step_counts.append(float(step_count))
             for seat, payoff in enumerate(payoffs):
                 seat_payoffs.setdefault(seat, []).append(payoff)
             for seat, outcome in enumerate(outcomes):
                 counts = outcome_counts.setdefault(seat, {"win": 0, "loss": 0, "draw": 0})
                 counts[outcome] = counts.get(outcome, 0) + 1
+            for seat, by_action in json.loads(row["actions_json"] or "{}").items():
+                seat_id = int(seat)
+                for action_name, count in dict(by_action).items():
+                    key = (str(action_name), seat_id)
+                    action_totals[key] = action_totals.get(key, 0) + int(count)
             episode_index = len(rolling) + 1
             seat_points: dict[str, dict[str, Any]] = {}
             for seat, payoff in enumerate(payoffs):
@@ -509,7 +554,10 @@ class RunDatabase:
                 }
             )
 
-        step_counts = [float(row["step_count"] or 0) for row in length_rows]
+        if metadata_step_counts:
+            step_counts = metadata_step_counts
+        else:
+            step_counts = [float(row["step_count"] or 0) for row in length_rows]
         episode_count = len(payoff_rows)
         total_duration = float(sum(durations))
         summary = {
@@ -537,16 +585,29 @@ class RunDatabase:
             str(seat): descriptive.summarize_outcomes(counts)
             for seat, counts in outcome_counts.items()
         }
-        action_total = sum(int(row["count"]) for row in action_rows) or 1
-        actions = [
-            {
-                "action": row["action_name"],
-                "player_id": row["player_id"],
-                "count": int(row["count"]),
-                "frequency": int(row["count"]) / action_total,
-            }
-            for row in action_rows
-        ]
+        if action_totals:
+            actions = [
+                {
+                    "action": action_name,
+                    "player_id": player_id,
+                    "count": count,
+                    "frequency": 0.0,
+                }
+                for (action_name, player_id), count in sorted(action_totals.items())
+            ]
+        else:
+            actions = [
+                {
+                    "action": row["action_name"],
+                    "player_id": row["player_id"],
+                    "count": int(row["count"]),
+                    "frequency": 0.0,
+                }
+                for row in action_rows
+            ]
+        action_total = sum(int(item["count"]) for item in actions) or 1
+        for item in actions:
+            item["frequency"] = int(item["count"]) / action_total
         total_duration = float(summary["total_duration"])
         episode_count = int(summary["episodes"])
         seat_zero = seat_payoff_stats.get("0", descriptive.mean_ci([]))

@@ -8,7 +8,7 @@ from app.services.dashboard_store import DashboardStore
 from app.services.runs import RunsService
 
 
-def test_dashboard_serves_statistics_and_full_replay(tmp_path, monkeypatch):
+def test_dashboard_serves_statistics_without_episode_replay_logs(tmp_path, monkeypatch):
     Trainer(
         TrainerConfig(
             run_id="web-test",
@@ -73,12 +73,15 @@ def test_dashboard_serves_statistics_and_full_replay(tmp_path, monkeypatch):
     assert "seat 0" in stats["seats"][0]["label"].lower()
     assert stats["focus_seat"] in {"0", "1"}
     assert stats["focus_seat_label"]
+    assert stats["actions"]
+    assert stats["average_steps"] > 0
     summaries = client.get("/api/runs/web-test/episodes").json()
+    assert summaries[0]["step_count"] > 0
     episode = client.get(
         f"/api/runs/web-test/episodes/{summaries[0]['id']}"
     ).json()
-    assert episode["steps"][0]["hidden_before"]["hand_cards"]
-    assert episode["steps"][0]["visible_before"]["raw"]["hand"]
+    assert episode["payoffs"]
+    assert episode["steps"] == []
 
 
 def test_run_list_uses_campaign_name_for_each_environment(tmp_path, monkeypatch):

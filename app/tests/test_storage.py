@@ -55,7 +55,9 @@ def test_legacy_import_statistics_and_export(tmp_path):
     destination = export_json(database, tmp_path / "export.json")
     exported = json.loads(destination.read_text(encoding="utf-8"))
     assert exported["episode_count"] == 1
-    assert exported["episodes"][0]["steps"][0]["hidden_before"]["hand_cards"]
+    assert exported["episodes"][0]["payoffs"] == [0.5, -0.5]
+    assert exported["episodes"][0]["steps"] == []
+    assert database.list_episodes(limit=1)[0]["step_count"] == 1
 
 
 def test_policy_era_database_columns_remain_readable_and_are_migrated(tmp_path):
