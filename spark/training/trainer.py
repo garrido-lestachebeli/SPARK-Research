@@ -13,7 +13,13 @@ from typing import Any
 
 from spark.agents import Agent, create_agent, default_agent_id
 from spark.environments import create_environment
-from spark.environments.rlcard_poker import DEFAULT_EPISODE_MODE, DEFAULT_STARTING_STACK, normalize_episode_mode
+from spark.environments.rlcard_poker import (
+    DEFAULT_BIG_BLIND,
+    DEFAULT_EPISODE_MODE,
+    DEFAULT_SMALL_BLIND,
+    DEFAULT_STARTING_STACK,
+    normalize_episode_mode,
+)
 from spark.league import update_ratings
 from spark.models import (
     Episode,
@@ -41,6 +47,8 @@ class TrainerConfig:
     agent_memory_size: int = 100
     league_reroll_interval: int = 0
     starting_stack: float = DEFAULT_STARTING_STACK
+    small_blind: int = DEFAULT_SMALL_BLIND
+    big_blind: int = DEFAULT_BIG_BLIND
     episode_mode: str = DEFAULT_EPISODE_MODE
     eval_interval: int = 0
     eval_episodes: int = 20
@@ -59,6 +67,13 @@ class Trainer:
         self.config = config
         self.config.league_reroll_interval = max(0, int(config.league_reroll_interval))
         self.config.starting_stack = max(1.0, float(config.starting_stack))
+        self.config.small_blind = max(1, int(config.small_blind))
+        self.config.big_blind = max(self.config.small_blind, int(config.big_blind))
+        if self.config.starting_stack < self.config.big_blind:
+            raise ValueError(
+                f"Starting stack {self.config.starting_stack} is below the big blind "
+                f"{self.config.big_blind}."
+            )
         self.config.episode_mode = normalize_episode_mode(config.episode_mode)
         self.config.eval_interval = max(0, int(config.eval_interval))
         self.config.eval_episodes = max(1, int(config.eval_episodes))
@@ -69,6 +84,8 @@ class Trainer:
             config.environment,
             config.table_size,
             starting_stack=self.config.starting_stack,
+            small_blind=self.config.small_blind,
+            big_blind=self.config.big_blind,
             episode_mode=self.config.episode_mode,
         )
         self.seat_configs = self._normalize_seat_configs()
@@ -116,11 +133,11 @@ class Trainer:
         return agents
 
     def _wire_opponents(self) -> None:
-        """Point each seat at another seat so agents can query ``action_probs``.
+        """Point each seat at the other seats so agents can query ``action_probs``.
 
-        Two-player tables (Leduc) wire seats to each other. Larger tables point
-        each seat at the next seat modulo n. Re-run after create, league re-roll,
-        and checkpoint load so references stay valid.
+        ``opponents`` is every other seat. ``opponent`` stays the next seat so
+        existing two-player callers keep working. Re-run after create, league
+        re-roll, and checkpoint load so references stay valid.
         """
         self._wire_opponents_for(self.agents)
 
@@ -129,6 +146,10 @@ class Trainer:
         seats = sorted(agents)
         if not seats:
             return
+        for seat in seats:
+            agents[seat].set_opponents(
+                {other: agents[other] for other in seats if other != seat}
+            )
         if len(seats) == 2:
             left, right = seats
             agents[left].set_opponent(agents[right])
@@ -425,6 +446,8 @@ class Trainer:
                 self.config.environment,
                 self.config.table_size,
                 starting_stack=self.config.starting_stack,
+                small_blind=self.config.small_blind,
+                big_blind=self.config.big_blind,
                 episode_mode=self.config.episode_mode,
             )
         return self._eval_environment
@@ -695,13 +718,24 @@ class Trainer:
             )
         if "starting_stack" in saved_config:
             self.config.starting_stack = max(1.0, float(saved_config["starting_stack"]))
+        if "small_blind" in saved_config:
+            self.config.small_blind = max(1, int(saved_config["small_blind"]))
+        if "big_blind" in saved_config:
+            self.config.big_blind = max(
+                self.config.small_blind, int(saved_config["big_blind"])
+            )
         if "episode_mode" in saved_config:
             self.config.episode_mode = normalize_episode_mode(saved_config["episode_mode"])
-        if "starting_stack" in saved_config or "episode_mode" in saved_config:
+        if any(
+            key in saved_config
+            for key in ("starting_stack", "small_blind", "big_blind", "episode_mode")
+        ):
             self.environment = create_environment(
                 self.config.environment,
                 self.config.table_size,
                 starting_stack=self.config.starting_stack,
+                small_blind=self.config.small_blind,
+                big_blind=self.config.big_blind,
                 episode_mode=self.config.episode_mode,
             )
             self._eval_environment = None

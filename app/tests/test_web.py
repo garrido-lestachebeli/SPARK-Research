@@ -27,8 +27,8 @@ def test_dashboard_serves_statistics_without_episode_replay_logs(tmp_path, monke
     assert page.status_code == 200
     assert 'id="performance-interpretation"' not in page.text
     assert 'id="run-environment"' in page.text
-    assert 'id="pot-display"' in page.text
-    assert 'id="public-cards"' in page.text
+    assert 'data-tab="replay"' not in page.text
+    assert 'id="replay"' not in page.text
     assert "Advanced diagnostics" in page.text
     assert 'id="save-agent-form"' in page.text
     assert 'data-tab="league"' in page.text
@@ -38,6 +38,8 @@ def test_dashboard_serves_statistics_without_episode_replay_logs(tmp_path, monke
     assert 'id="eval-chart"' in page.text
     assert 'id="eval-opponent-lineup"' in page.text
     assert 'name="starting_stack"' in page.text
+    assert 'name="small_blind"' in page.text
+    assert 'name="big_blind"' in page.text
     assert 'name="episode_mode"' in page.text
     assert 'name="league_reroll_interval"' in page.text
     assert 'data-preset="learner-vs-league"' in page.text

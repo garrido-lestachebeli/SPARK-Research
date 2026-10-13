@@ -91,6 +91,13 @@ def test_league_seed_builtins_and_reject_bad_ids(tmp_path):
     limit_created = league.seed_builtins("limit-holdem")
     assert {item["agent_id"] for item in limit_created} == {"limit-rule-v1"}
 
+    no_limit_created = league.seed_builtins("no-limit-holdem")
+    assert {item["agent_id"] for item in no_limit_created} == {
+        "no-limit-call-only",
+        "no-limit-always-raise",
+        "no-limit-strong-hands",
+    }
+
     # RLCard opponents cannot train, so they are forced to snapshot mode.
     cfr = next(item for item in created if item["agent_id"] == "leduc-cfr")
     assert cfr["mode"] == "snapshot"

@@ -56,6 +56,8 @@ def create_environment(
     num_players: int | None = None,
     *,
     starting_stack: float | None = None,
+    small_blind: int | None = None,
+    big_blind: int | None = None,
     max_hands: int | None = None,
     episode_mode: str | None = None,
 ) -> EnvironmentAdapter:
@@ -74,6 +76,10 @@ def create_environment(
     kwargs: dict[str, float | int | str] = {}
     if starting_stack is not None:
         kwargs["starting_stack"] = float(starting_stack)
+    if small_blind is not None:
+        kwargs["small_blind"] = int(small_blind)
+    if big_blind is not None:
+        kwargs["big_blind"] = int(big_blind)
     if max_hands is not None:
         kwargs["max_hands"] = int(max_hands)
     if episode_mode is not None:

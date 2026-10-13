@@ -48,6 +48,23 @@ BUILTIN_OPPONENTS: dict[str, list[dict[str, str]]] = {
             "notes": "Rule-based Limit Hold'em opponent from RLCard.",
         },
     ],
+    "no-limit-holdem": [
+        {
+            "agent_id": "no-limit-call-only",
+            "name": "Call Only Agent",
+            "notes": "Always checks or calls. Never folds and never raises.",
+        },
+        {
+            "agent_id": "no-limit-always-raise",
+            "name": "Always Raise Agent",
+            "notes": "Always takes the largest legal raise, otherwise calls.",
+        },
+        {
+            "agent_id": "no-limit-strong-hands",
+            "name": "Strong Hands Agent",
+            "notes": "Raises strong hands and folds weak ones.",
+        },
+    ],
 }
 
 

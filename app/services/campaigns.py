@@ -55,6 +55,12 @@ class CampaignService:
             0, int(config.get("league_reroll_interval", 0))
         )
         config["starting_stack"] = max(1.0, float(config.get("starting_stack", 50)))
+        config["small_blind"] = max(1, int(config.get("small_blind", 1)))
+        config["big_blind"] = max(config["small_blind"], int(config.get("big_blind", 2)))
+        if config["starting_stack"] < config["big_blind"]:
+            raise ValueError(
+                "Starting stack must be at least the big blind."
+            )
         config["episode_mode"] = normalize_episode_mode(config.get("episode_mode", "session"))
 
         campaign_id = f"campaign-{uuid.uuid4().hex[:10]}"
@@ -88,6 +94,8 @@ class CampaignService:
                 eval_episodes=int(config["eval_episodes"]),
                 league_reroll_interval=int(config["league_reroll_interval"]),
                 starting_stack=float(config.get("starting_stack", 50)),
+                small_blind=int(config.get("small_blind", 1)),
+                big_blind=int(config.get("big_blind", 2)),
                 episode_mode=str(config.get("episode_mode", "session")),
                 league_store=self.league,
             )
@@ -380,6 +388,12 @@ class CampaignService:
             config["starting_stack"] = float(
                 run_config.get("starting_stack", config.get("starting_stack", 50))
             )
+            config["small_blind"] = int(
+                run_config.get("small_blind", config.get("small_blind", 1))
+            )
+            config["big_blind"] = int(
+                run_config.get("big_blind", config.get("big_blind", 2))
+            )
             config["episode_mode"] = normalize_episode_mode(
                 run_config.get("episode_mode", config.get("episode_mode", "session"))
             )
@@ -452,6 +466,10 @@ class CampaignService:
             str(config.get("agent_memory_size", 100)),
             "--starting-stack",
             str(config.get("starting_stack", 50)),
+            "--small-blind",
+            str(config.get("small_blind", 1)),
+            "--big-blind",
+            str(config.get("big_blind", 2)),
             "--episode-mode",
             str(config.get("episode_mode", "session")),
         ]

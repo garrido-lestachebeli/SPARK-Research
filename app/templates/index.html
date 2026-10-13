@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>SPARK Training Console</title>
   <!-- Relative paths so Open OnDemand /rnode and /node proxies work. -->
-  <link rel="stylesheet" href="static/style.css?v=eval-overlay-4">
+  <link rel="stylesheet" href="static/style.css?v=overview-3">
 </head>
 <body>
   <header class="topbar">
@@ -20,7 +20,6 @@
     <button data-tab="overview" class="active">Overview</button>
     <button data-tab="campaigns">Campaigns</button>
     <button data-tab="league">League</button>
-    <button data-tab="replay">Episode Replay</button>
   </nav>
 
   <main>
@@ -154,6 +153,14 @@
               Starting stack
               <input name="starting_stack" type="number" min="1" step="1" value="50">
             </label>
+            <label title="Small blind in chips. Hold'em posts this before the first action.">
+              Small blind
+              <input name="small_blind" type="number" min="1" step="1" value="1">
+            </label>
+            <label title="Big blind in chips. Must be at least the small blind, and no larger than the starting stack.">
+              Big blind
+              <input name="big_blind" type="number" min="1" step="1" value="2">
+            </label>
             <label title="session = keep playing hands until someone busts; hand = one poker hand per episode">
               Episode mode
               <select name="episode_mode">
@@ -174,8 +181,9 @@
             The agent learns after every episode. Evaluation interval k freezes it every
             k episodes and plays n test episodes against every active League member;
             those results feed the box plot on the Overview tab and are never trained on.
-            Starting stack is the chip buy-in for each seat at the start of a session episode
-            (play continues until someone goes bust).
+            Starting stack is the chip buy-in for each seat. Small blind and big blind
+            are posted at the start of each Hold'em hand. The big blind must be at
+            least the small blind, and the starting stack must cover the big blind.
           </p>
           <button type="submit" class="primary">Submit campaign</button>
           <p id="campaign-message" class="message"></p>
@@ -306,55 +314,8 @@
       </article>
     </section>
 
-    <section id="replay" class="tab-panel">
-      <div class="section-heading">
-        <div><p class="eyebrow">Full information</p><h2>Episode replay</h2></div>
-        <div class="inline-controls">
-          <div class="run-picker">
-            <select id="replay-run-select"></select>
-            <span id="replay-run-environment" class="run-environment"></span>
-          </div>
-          <select id="episode-select"></select>
-        </div>
-      </div>
-      <div class="replay-layout">
-        <article class="panel poker-table">
-          <div class="table-felt">
-            <div id="replay-players" class="replay-players"></div>
-            <div class="table-center">
-              <div id="pot-display" class="pot-display">
-                <span class="pot-label">Pot</span>
-                <strong id="pot-amount">—</strong>
-              </div>
-              <div class="board">
-                <span>Community</span>
-                <div id="public-cards" class="card-row" aria-label="Public cards"></div>
-              </div>
-              <small id="hand-meta" class="hand-meta"></small>
-            </div>
-          </div>
-          <div id="action-banner" class="action-banner">Select an episode</div>
-        </article>
-        <article class="panel inspector">
-          <div class="timeline-controls">
-            <button id="step-first">|&lt;</button>
-            <button id="step-prev">&lt;</button>
-            <button id="step-play">Play</button>
-            <button id="step-next">&gt;</button>
-            <button id="step-last">&gt;|</button>
-            <span id="timeline-label">0 / 0</span>
-          </div>
-          <input id="timeline" type="range" min="0" max="0" value="0">
-          <h3>Visible observation (agent input)</h3>
-          <pre id="visible-json">{}</pre>
-          <h3>Hidden / perfect state (replay only)</h3>
-          <pre id="hidden-json">{}</pre>
-          <details><summary>Complete raw step</summary><pre id="raw-json">{}</pre></details>
-        </article>
-      </div>
-    </section>
   </main>
 
-  <script src="static/app.js?v=eval-overlay-4"></script>
+  <script src="static/app.js?v=overview-4"></script>
 </body>
 </html>

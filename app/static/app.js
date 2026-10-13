@@ -1,4 +1,4 @@
-const state = {
+﻿const state = {
   config: null,
   environmentNames: {},
   agentSnapshots: [],
@@ -11,11 +11,6 @@ const state = {
   selectedOverviewSeat: null,
   selectedEvalOpponent: null,
   overviewStats: null,
-  selectedEpisode: null,
-  episodes: [],
-  episode: null,
-  step: 0,
-  playing: null,
   activeTab: "overview",
   draggedMember: null,
   pollInFlight: false,
@@ -135,20 +130,17 @@ function renderConfig(config) {
 async function loadRuns({ refreshDetails = true } = {}) {
   state.runs = await api("/api/runs");
   renderRunSelect("#run-select");
-  renderRunSelect("#replay-run-select");
   if (state.runs.length) {
     const selectionExists = state.runs.some((run) => run.id === state.selectedRun);
     if (!selectionExists) {
       state.selectedRun = state.runs[0].id;
-      state.selectedEpisode = null;
       state.selectedOverviewSeat = null;
       state.selectedEvalOpponent = null;
     }
     $("#run-select").value = state.selectedRun;
-    $("#replay-run-select").value = state.selectedRun;
     updateRunEnvironmentLabels();
     if (refreshDetails) {
-      await Promise.all([loadStatistics(), loadEpisodes()]);
+      await loadStatistics();
     }
   } else {
     state.selectedRun = null;
@@ -193,9 +185,6 @@ function updateRunEnvironmentLabels() {
     ? state.environmentNames[run.environment] || run.environment
     : "";
   $("#run-environment").textContent = environment
-    ? `Environment: ${environment}`
-    : "";
-  $("#replay-run-environment").textContent = environment
     ? `Environment: ${environment}`
     : "";
 }
@@ -442,6 +431,7 @@ function drawPayoffChart(points, seat = "0") {
   });
   context.stroke();
 }
+
 
 // Okabe-Ito qualitative palette: distinguishable under deuteranopia,
 // protanopia, and tritanopia. Opponents are also labelled on the x axis so
@@ -973,7 +963,7 @@ function leagueMemberCard(member) {
       data-member="${escapeHtml(member.id)}" data-status="${escapeHtml(member.status)}">
       <div class="league-member-header">
         <div>
-          <strong><span class="drag-handle" aria-hidden="true">⠿</span> ${escapeHtml(member.name)}</strong>
+          <strong><span class="drag-handle" aria-hidden="true">â ¿</span> ${escapeHtml(member.name)}</strong>
           <span>${escapeHtml(member.agent_name || member.agent_id)} · ${escapeHtml(member.source_kind || "blank")}</span>
           <small>
             ${formatNumber(stats.matches)} matches ·
@@ -1466,7 +1456,7 @@ async function loadCampaigns() {
               .map((seat, index) => {
                 const source = seat.source || "fresh";
                 if (source === "league_random") {
-                  return `Seat ${index}: League random → ${seat.agent_id}`;
+                  return `Seat ${index}: League random â†’ ${seat.agent_id}`;
                 }
                 if (source === "league_member") {
                   return `Seat ${index}: League member (${seat.agent_id})`;
@@ -1574,6 +1564,8 @@ async function submitCampaign(event) {
     eval_episodes: Number(form.get("eval_episodes") || 20),
     league_reroll_interval: Number(form.get("league_reroll_interval") || 0),
     starting_stack: Number(form.get("starting_stack") || 50),
+    small_blind: Number(form.get("small_blind") || 1),
+    big_blind: Number(form.get("big_blind") || 2),
     episode_mode: form.get("episode_mode") || "session",
     agent_memory_size: Number(form.get("agent_memory_size")),
     cpus: Number(form.get("cpus")),
@@ -1590,231 +1582,14 @@ async function submitCampaign(event) {
   }
 }
 
-async function loadEpisodes() {
-  if (!state.selectedRun) return;
-  state.episodes = await api(`/api/runs/${encodeURIComponent(state.selectedRun)}/episodes?limit=200`);
-  $("#episode-select").innerHTML = state.episodes.map((episode) =>
-    `<option value="${episode.id}">#${episode.episode_number} · ${episode.outcomes.join(" / ")} · ${episode.step_count} actions</option>`
-  ).join("") || '<option value="">No episodes</option>';
-  if (!state.episodes.length) {
-    state.selectedEpisode = null;
-    state.episode = null;
-    return;
-  }
-  const stillAvailable = state.episodes.some(
-    (episode) => String(episode.id) === String(state.selectedEpisode),
-  );
-  const episodeId = stillAvailable ? state.selectedEpisode : state.episodes[0].id;
-  $("#episode-select").value = String(episodeId);
-  await loadEpisode(episodeId, { resetStep: !stillAvailable });
-}
-
-async function loadEpisode(episodeId, { resetStep = true } = {}) {
-  if (!episodeId) return;
-  const sameEpisode = String(state.selectedEpisode) === String(episodeId) && state.episode;
-  state.selectedEpisode = episodeId;
-  state.episode = await api(`/api/runs/${encodeURIComponent(state.selectedRun)}/episodes/${episodeId}`);
-  if (resetStep || !sameEpisode) {
-    state.step = 0;
-  } else {
-    state.step = Math.max(0, Math.min(state.step, state.episode.steps.length));
-  }
-  $("#timeline").max = state.episode.steps.length;
-  $("#timeline").value = state.step;
-  renderReplay();
-}
-
-function replayFrame() {
-  if (!state.episode?.steps.length) return null;
-  if (state.step === 0) {
-    const first = state.episode.steps[0];
-    return { visible: first.visible_before, hidden: first.hidden_before, action: null, raw: first };
-  }
-  const step = state.episode.steps[state.step - 1];
-  return { visible: step.visible_after, hidden: step.hidden_after, action: step, raw: step };
-}
-
-function renderReplay() {
-  const episode = state.episode;
-  const frame = replayFrame();
-  if (!episode) return;
-  if (!frame) {
-    $("#timeline").value = 0;
-    $("#timeline").max = 0;
-    $("#timeline-label").textContent = "0 / 0";
-    $("#action-banner").textContent =
-      "Episode metadata only — full step logs are not stored (saves disk). Overview stats still use payoffs, outcomes, and action tallies.";
-    $("#visible-json").textContent = json({
-      payoffs: episode.payoffs,
-      outcomes: episode.outcomes,
-      winner: episode.winner,
-      seed: episode.seed,
-    });
-    $("#hidden-json").textContent = "{}";
-    $("#raw-json").textContent = "{}";
-    $("#pot-amount").textContent = "—";
-    $("#replay-players").innerHTML = "";
-    return;
-  }
-  $("#timeline").value = state.step;
-  $("#timeline-label").textContent = `${state.step} / ${episode.steps.length}`;
-  $("#visible-json").textContent = json(frame.visible);
-  $("#hidden-json").textContent = json(frame.hidden);
-  $("#raw-json").textContent = json(frame.raw);
-  $("#action-banner").textContent = frame.action
-    ? `Player ${frame.action.player_id} → ${frame.action.action_name.toUpperCase()} · legal: ${frame.action.legal_actions.join(", ")}`
-    : `Initial deal · seed ${episode.seed}`;
-
-  const hidden = frame.hidden || {};
-  const visible = frame.visible || {};
-  const hands = hidden.hand_cards || hidden.hands || [];
-  const stacks = hidden.stacks || visible.stacks || [];
-  const committed = hidden.chips || visible.raw?.all_chips || [];
-  const playerCount = Math.max(
-    hands.length,
-    stacks.length,
-    committed.length,
-    episode.payoffs?.length || 0,
-    (frame.raw?.player_id ?? -1) + 1,
-  );
-  const pot = committed.reduce((sum, value) => sum + Number(value || 0), 0);
-  $("#pot-amount").textContent = committed.length ? formatChips(pot) : "—";
-  const metaBits = [];
-  if (hidden.hand_index != null) metaBits.push(`Hand ${Number(hidden.hand_index) + 1}`);
-  if (hidden.starting_stack != null) metaBits.push(`Buy-in ${formatChips(hidden.starting_stack)}`);
-  if (hidden.big_blind != null) metaBits.push(`BB ${formatChips(hidden.big_blind)}`);
-  $("#hand-meta").textContent = metaBits.join(" · ");
-
-  $("#replay-players").innerHTML = Array.from(
-    { length: playerCount },
-    (_, playerId) => {
-      const active = playerId === frame.raw?.player_id;
-      const stackValue = stacks[playerId];
-      const inPot = committed[playerId];
-      return `
-        <div class="player-seat ${active ? "active" : ""}">
-          <span class="seat-label">Player ${playerId}${active ? " · acting" : ""}</span>
-          <div class="card-row">${renderCardsHtml(hands[playerId])}</div>
-          <div class="chip-pile" title="Remaining stack">
-            <span class="chip-token" aria-hidden="true"></span>
-            <span>Stack ${stackValue == null ? "—" : formatChips(stackValue)}</span>
-          </div>
-          <div class="chip-pile committed" title="Chips committed this hand">
-            <span class="chip-token" aria-hidden="true"></span>
-            <span>In pot ${inPot == null ? "—" : formatChips(inPot)}</span>
-          </div>
-        </div>
-      `;
-    },
-  ).join("");
-
-  const publicCards = normalizeCardList(hidden.public_cards ?? hidden.public_card);
-  $("#public-cards").innerHTML = publicCards.length
-    ? publicCards.map(renderCardHtml).join("")
-    : '<span class="card-empty">No community cards</span>';
-
-  if (state.step === episode.steps.length) {
-    $("#action-banner").textContent += ` · Final payoffs: ${episode.payoffs.join(" / ")}`;
-  }
-}
-
-function formatChips(value) {
-  const number = Number(value);
-  if (!Number.isFinite(number)) return String(value);
-  return Number.isInteger(number) ? String(number) : number.toFixed(1);
-}
-
-function normalizeCardList(value) {
-  if (value == null || value === "") return [];
-  if (Array.isArray(value)) {
-    return value.flatMap((item) => normalizeCardList(item));
-  }
-  const text = String(value).trim();
-  if (!text || text.toLowerCase() === "none" || text.toLowerCase() === "null") return [];
-  // Allow "HK SJ" style strings as well as single codes like "HK".
-  if (text.includes(" ") || text.includes(",")) {
-    return text.split(/[\s,]+/).filter(Boolean);
-  }
-  return [text];
-}
-
-function parseCardCode(code) {
-  const raw = String(code || "").trim().toUpperCase();
-  if (!raw) return null;
-  // RLCard style: suit then rank, e.g. HK, SJ, CT, S10
-  let match = raw.match(/^([SHDC])([A23456789TJQK]|10)$/);
-  if (match) {
-    return { suit: match[1], rank: match[2] === "T" ? "10" : match[2] };
-  }
-  // Rank then suit, e.g. KH, JS, 10S
-  match = raw.match(/^([A23456789TJQK]|10)([SHDC])$/);
-  if (match) {
-    return { suit: match[2], rank: match[1] === "T" ? "10" : match[1] };
-  }
-  return { suit: null, rank: raw };
-}
-
-function renderCardHtml(code) {
-  const parsed = parseCardCode(code);
-  if (!parsed) {
-    return '<span class="card-empty">—</span>';
-  }
-  const suitSymbols = { S: "♠", H: "♥", D: "♦", C: "♣" };
-  const suit = parsed.suit;
-  const symbol = suitSymbols[suit] || "";
-  const color = suit === "H" || suit === "D" ? "red" : "black";
-  if (!suit) {
-    return `<div class="playing-card black" title="${escapeHtml(String(code))}">
-      <span class="rank">${escapeHtml(parsed.rank)}</span>
-      <span class="suit-center">?</span>
-    </div>`;
-  }
-  return `<div class="playing-card ${color}" title="${escapeHtml(String(code))}">
-    <span class="rank">${escapeHtml(parsed.rank)}</span>
-    <span class="suit-corner">${symbol}</span>
-    <span class="suit-center">${symbol}</span>
-  </div>`;
-}
-
-function renderCardsHtml(value) {
-  const cards = normalizeCardList(value);
-  if (!cards.length) return '<span class="card-empty">—</span>';
-  return cards.map(renderCardHtml).join("");
-}
-
-function formatCards(value) {
-  const cards = normalizeCardList(value);
-  return cards.length ? cards.join("  ") : "—";
-}
-
-function moveStep(value) {
-  if (!state.episode) return;
-  state.step = Math.max(0, Math.min(value, state.episode.steps.length));
-  renderReplay();
-}
-
 document.querySelectorAll(".tabs button").forEach((button) =>
   button.addEventListener("click", () => setTab(button.dataset.tab)));
 $("#run-select").addEventListener("change", async (event) => {
   state.selectedRun = event.target.value;
-  state.selectedEpisode = null;
   state.selectedOverviewSeat = null;
   state.selectedEvalOpponent = null;
-  $("#replay-run-select").value = state.selectedRun;
   updateRunEnvironmentLabels();
-  await Promise.all([loadStatistics(), loadEpisodes()]);
-});
-$("#replay-run-select").addEventListener("change", async (event) => {
-  state.selectedRun = event.target.value;
-  state.selectedEpisode = null;
-  state.selectedOverviewSeat = null;
-  state.selectedEvalOpponent = null;
-  $("#run-select").value = state.selectedRun;
-  updateRunEnvironmentLabels();
-  await Promise.all([loadStatistics(), loadEpisodes()]);
-});
-$("#episode-select").addEventListener("change", (event) => {
-  loadEpisode(event.target.value, { resetStep: true });
+  await loadStatistics();
 });
 $("#campaign-form").addEventListener("submit", submitCampaign);
 $("#save-agent-form").addEventListener("submit", saveAgentSnapshot);
@@ -1831,23 +1606,6 @@ $("#league-refresh")?.addEventListener("click", loadLeagueMembers);
 $("#league-seed-builtins")?.addEventListener("click", seedLeagueBuiltins);
 $("#league-create-form")?.addEventListener("submit", createLeagueMember);
 $("#league-import-form")?.addEventListener("submit", importLeagueMember);
-$("#timeline").addEventListener("input", (event) => moveStep(Number(event.target.value)));
-$("#step-first").addEventListener("click", () => moveStep(0));
-$("#step-prev").addEventListener("click", () => moveStep(state.step - 1));
-$("#step-next").addEventListener("click", () => moveStep(state.step + 1));
-$("#step-last").addEventListener("click", () => moveStep(state.episode?.steps.length || 0));
-$("#step-play").addEventListener("click", () => {
-  if (state.playing) {
-    clearInterval(state.playing); state.playing = null; $("#step-play").textContent = "Play"; return;
-  }
-  $("#step-play").textContent = "Pause";
-  state.playing = setInterval(() => {
-    if (!state.episode || state.step >= state.episode.steps.length) {
-      clearInterval(state.playing); state.playing = null; $("#step-play").textContent = "Play"; return;
-    }
-    moveStep(state.step + 1);
-  }, 800);
-});
 
 initialize();
 setInterval(() => {
@@ -1861,9 +1619,6 @@ setInterval(() => {
   ];
   if (state.activeTab === "overview" && state.selectedRun) {
     tasks.push(loadStatistics());
-  }
-  if (state.activeTab === "replay" && state.selectedRun) {
-    tasks.push(loadEpisodes());
   }
   if (state.activeTab !== "league") {
     tasks.push(loadAgentSnapshots(), loadLeagueMembers(), loadAllLeagueMembers());

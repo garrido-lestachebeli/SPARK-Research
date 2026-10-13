@@ -22,6 +22,8 @@ LIMIT_ACTIONS = {0: "call", 1: "raise", 2: "fold", 3: "check"}
 # Buy-in for a session. Small enough that random-agent tests finish quickly,
 # large enough for several hands of play-style signal before someone busts.
 DEFAULT_STARTING_STACK = 50.0
+DEFAULT_SMALL_BLIND = 1
+DEFAULT_BIG_BLIND = 2
 DEFAULT_MAX_HANDS = 500
 EPISODE_MODES = ("session", "hand")
 DEFAULT_EPISODE_MODE = "session"
@@ -83,11 +85,20 @@ class RLCardPokerAdapter(EnvironmentAdapter):
         num_players: int = 2,
         *,
         starting_stack: float = DEFAULT_STARTING_STACK,
+        small_blind: int = DEFAULT_SMALL_BLIND,
+        big_blind: int = DEFAULT_BIG_BLIND,
         max_hands: int = DEFAULT_MAX_HANDS,
         episode_mode: str = DEFAULT_EPISODE_MODE,
     ) -> None:
         self.num_players = int(num_players)
+        self.small_blind = max(1, int(small_blind))
+        self.big_blind = max(self.small_blind, int(big_blind))
         self.starting_stack = float(starting_stack)
+        if self.starting_stack < self.big_blind:
+            raise ValueError(
+                f"Starting stack {self.starting_stack} is below the big blind "
+                f"{self.big_blind}."
+            )
         self.episode_mode = normalize_episode_mode(episode_mode)
         # Single-hand mode always ends after the first hand, regardless of stack.
         self.max_hands = 1 if self.episode_mode == "hand" else max(1, int(max_hands))
@@ -98,7 +109,9 @@ class RLCardPokerAdapter(EnvironmentAdapter):
         self._hand_index = 0
         self._base_seed = 0
         self._episode_done = False
-        self._big_blind = 2.0
+        self._action_log: list[dict[str, Any]] = []
+        self._big_blind = float(self.big_blind)
+        self._small_blind = float(self.small_blind)
 
     def reset(self, seed: int) -> Decision:
         self._base_seed = int(seed)
@@ -115,6 +128,7 @@ class RLCardPokerAdapter(EnvironmentAdapter):
         legal = list(self._state["legal_actions"].keys())
         if action not in legal:
             raise ValueError(f"Illegal action {action}; legal actions are {legal}")
+        self._record_action(int(self._player_id), int(action), legal)
         self._state, self._player_id = self._env.step(action)
         if not self._env.is_over():
             return self._decision(self._state, self._player_id)
@@ -146,6 +160,8 @@ class RLCardPokerAdapter(EnvironmentAdapter):
                 "stacks": list(self._stacks),
                 "hand_index": self._hand_index,
                 "starting_stack": self.starting_stack,
+                "small_blind": self._small_blind,
+                "big_blind": self._big_blind,
                 "episode_mode": self.episode_mode,
             }
         try:
@@ -162,6 +178,7 @@ class RLCardPokerAdapter(EnvironmentAdapter):
         info["stacks"] = list(self._stacks)
         info["hand_index"] = self._hand_index
         info["starting_stack"] = self.starting_stack
+        info["small_blind"] = self._small_blind
         info["big_blind"] = self._big_blind
         info["episode_mode"] = self.episode_mode
         return info
@@ -175,10 +192,47 @@ class RLCardPokerAdapter(EnvironmentAdapter):
             # RLCard gives every seat the same buy-in for a hand; use the shortest
             # remaining stack so all-ins cannot exceed true session chips.
             config["chips_for_each"] = max(1, int(min(self._stacks)))
+        self._action_log = []
         self._env = rlcard.make(self.rlcard_id, config=config)
-        self._big_blind = float(getattr(self._env.game, "big_blind", 2) or 2)
+        self._apply_blinds()
         self._state, self._player_id = self._env.reset()
+        game = getattr(self._env, "game", None)
+        self._big_blind = float(getattr(game, "big_blind", self.big_blind) or self.big_blind)
+        self._small_blind = float(
+            getattr(game, "small_blind", self.small_blind) or self.small_blind
+        )
         return self._decision(self._state, self._player_id)
+
+    def _apply_blinds(self) -> None:
+        """Copy the configured blinds onto the live RLCard game before the deal.
+
+        Limit and Leduc also size a raise from ``raise_amount``, which is copied
+        from the big blind at construction. Set it again so a custom big blind
+        changes the raise as well as the posted blinds.
+        """
+        game = getattr(self._env, "game", None)
+        if game is None or not hasattr(game, "big_blind"):
+            return
+        game.small_blind = int(self.small_blind)
+        game.big_blind = int(self.big_blind)
+        if hasattr(game, "raise_amount"):
+            game.raise_amount = int(self.big_blind)
+
+    def _record_action(self, seat: int, action: int, legal_actions: list[int]) -> None:
+        game = getattr(self._env, "game", None)
+        stage = getattr(game, "stage", None)
+        if hasattr(stage, "value"):
+            stage = int(stage.value)
+        elif stage is not None:
+            stage = int(stage) if str(stage).lstrip("-").isdigit() else str(stage)
+        self._action_log.append(
+            {
+                "seat": int(seat),
+                "action": int(action),
+                "legal_actions": [int(item) for item in legal_actions],
+                "stage": stage,
+            }
+        )
 
     def _session_should_end(self) -> bool:
         if self.episode_mode == "hand":
@@ -198,6 +252,7 @@ class RLCardPokerAdapter(EnvironmentAdapter):
             "my_stack": float(self._stacks[int(player_id)]),
             "hand_index": self._hand_index,
             "starting_stack": self.starting_stack,
+            "small_blind": self._small_blind,
             "big_blind": self._big_blind,
             "episode_mode": self.episode_mode,
         }

@@ -27,6 +27,8 @@ args=(
   --league-reroll-interval "${SPARK_LEAGUE_REROLL_INTERVAL:-0}"
   --agent-memory-size "${SPARK_AGENT_MEMORY_SIZE:-100}"
   --starting-stack "${SPARK_STARTING_STACK:-50}"
+  --small-blind "${SPARK_SMALL_BLIND:-1}"
+  --big-blind "${SPARK_BIG_BLIND:-2}"
   --episode-mode "${SPARK_EPISODE_MODE:-session}"
 )
 if [[ -n "${SPARK_SEAT_CONFIG_B64:-}" ]]; then

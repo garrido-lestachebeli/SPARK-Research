@@ -34,6 +34,30 @@ def test_statistics_include_confidence_intervals(tmp_path):
     assert stats["highlights"]["seat_0_win_rate_ci"][0] <= stats["highlights"]["seat_0_win_rate"]
 
 
+def test_q_table_size_series_reports_distinct_states(tmp_path):
+    Trainer(
+        TrainerConfig(
+            run_id="q-size",
+            environment="leduc-holdem",
+            run_directory=str(tmp_path),
+            episode_limit=1,
+        )
+    ).run()
+    database = RunDatabase(tmp_path / "q-size" / "run.sqlite", initialize=False)
+    for episode in range(900):
+        database.save_metrics(episode, {"seat_0.table_size": float(episode)})
+
+    series = database.q_table_size_series()
+    assert series["unit"] == "distinct Q-states"
+    assert series["x_unit"] == "training episode"
+    points = series["seats"]["0"]
+    assert len(points) <= 401
+    assert points[0] == {"episode": 0, "states": 0}
+    assert points[-1] == {"episode": 899, "states": 899}
+    stats = database.statistics()
+    assert stats["q_table_size"]["seats"]["0"][-1]["states"] == 899
+
+
 def evaluation_rows(payoffs, *, seat=0, member="league-a", name="A"):
     return [
         {

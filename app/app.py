@@ -64,6 +64,8 @@ class CampaignRequest(BaseModel):
     eval_episodes: int = Field(default=20, ge=1)
     league_reroll_interval: int = Field(default=0, ge=0)
     starting_stack: float = Field(default=50.0, ge=1)
+    small_blind: int = Field(default=1, ge=1)
+    big_blind: int = Field(default=2, ge=1)
     episode_mode: Literal["session", "hand"] = "session"
     partition: str | None = None
     cpus: int = Field(default=1, ge=1, le=256)

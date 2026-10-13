@@ -29,8 +29,9 @@ class Agent(ABC):
         self.episodes_seen = 0
         self.training = bool(self.config.get("training", True))
         self._random = random.Random(self.seed)
-        # Runtime-only reference for querying another seat's policy (not checkpointed).
+        # Runtime-only references for querying other seats' policies (not checkpointed).
         self.opponent: Agent | None = None
+        self.opponents: dict[int, Agent] = {}
 
     def set_training(self, enabled: bool) -> None:
         """Switch between learning/exploration and frozen evaluation."""
@@ -51,6 +52,16 @@ class Agent(ABC):
             calls this automatically via ``_wire_opponents``.
         """
         self.opponent = opponent
+
+    def set_opponents(self, opponents: dict[int, Agent] | None) -> None:
+        """Attach every other seat so beliefs can be updated one opponent at a time.
+
+        ``set_opponent`` remains the next seat, which Leduc already uses. This
+        map is the full table. Neither reference is written into checkpoints.
+        """
+        self.opponents = {
+            int(seat): agent for seat, agent in dict(opponents or {}).items()
+        }
 
     def pi(
         self,

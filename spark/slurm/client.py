@@ -45,6 +45,8 @@ class SlurmClient:
                 int(config.get("league_reroll_interval", 0))
             ),
             "SPARK_STARTING_STACK": str(float(config.get("starting_stack", 50))),
+            "SPARK_SMALL_BLIND": str(int(config.get("small_blind", 1))),
+            "SPARK_BIG_BLIND": str(int(config.get("big_blind", 2))),
             "SPARK_EPISODE_MODE": str(config.get("episode_mode", "session")),
             "SPARK_EPISODES": str(config.get("episodes") or ""),
             "SPARK_AGENT_MEMORY_SIZE": str(

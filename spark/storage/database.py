@@ -654,7 +654,68 @@ class RunDatabase:
                 ],
                 "seat_0_std_payoff": seat_zero["std"],
             },
+            "q_table_size": self.q_table_size_series(),
         }
+
+    def q_table_size_series(self, *, max_points: int = 400) -> dict[str, Any]:
+        """Downsampled ``seat_N.table_size`` series for the temporary Overview chart.
+
+        ``states`` is the number of distinct Q-table keys (``len(q)``), not bytes.
+        """
+        empty: dict[str, Any] = {
+            "unit": "distinct Q-states",
+            "x_unit": "training episode",
+            "seats": {},
+        }
+        with self.connect(readonly=True) as connection:
+            exists = connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+                ("metric_snapshots",),
+            ).fetchone()
+            if not exists:
+                return empty
+            rows = connection.execute(
+                """
+                SELECT episode_number, name, value
+                FROM metric_snapshots
+                WHERE name LIKE 'seat_%.table_size'
+                ORDER BY episode_number
+                """
+            ).fetchall()
+        grouped: dict[str, list[dict[str, int]]] = {}
+        for row in rows:
+            name = str(row["name"])
+            seat = name.split(".", 1)[0].removeprefix("seat_")
+            grouped.setdefault(seat, []).append(
+                {
+                    "episode": int(row["episode_number"]),
+                    "states": int(row["value"]),
+                }
+            )
+        return {
+            "unit": "distinct Q-states",
+            "x_unit": "training episode",
+            "seats": {
+                seat: self._downsample_series(points, max_points)
+                for seat, points in grouped.items()
+            },
+        }
+
+    @staticmethod
+    def _downsample_series(
+        points: list[dict[str, int]],
+        max_points: int,
+    ) -> list[dict[str, int]]:
+        if len(points) <= max_points or max_points < 2:
+            return points
+        last = len(points) - 1
+        indexes = {
+            min(last, round(index * last / (max_points - 1)))
+            for index in range(max_points)
+        }
+        indexes.add(0)
+        indexes.add(last)
+        return [points[index] for index in sorted(indexes)]
 
     def save_evaluation_episodes(self, rows: list[dict[str, Any]]) -> int:
         """Persist frozen test episodes. Replaces rows so a resumed round is idempotent."""

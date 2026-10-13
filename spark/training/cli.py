@@ -92,6 +92,18 @@ def build_parser() -> argparse.ArgumentParser:
         help="Chip buy-in for each seat at the start of a cash-session episode.",
     )
     parser.add_argument(
+        "--small-blind",
+        type=int,
+        default=1,
+        help="Small blind in chips. Defaults to 1.",
+    )
+    parser.add_argument(
+        "--big-blind",
+        type=int,
+        default=2,
+        help="Big blind in chips. Defaults to 2. Must be at least the small blind.",
+    )
+    parser.add_argument(
         "--episode-mode",
         choices=["session", "hand"],
         default="session",
@@ -133,6 +145,8 @@ def main() -> None:
             eval_episodes=max(1, args.eval_episodes),
             league_reroll_interval=max(0, args.league_reroll_interval),
             starting_stack=max(1.0, float(args.starting_stack)),
+            small_blind=max(1, int(args.small_blind)),
+            big_blind=max(1, int(args.big_blind)),
             episode_mode=args.episode_mode,
         )
     )

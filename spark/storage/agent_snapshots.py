@@ -160,6 +160,8 @@ class AgentSnapshotStore:
         eval_episodes: int = 20,
         league_reroll_interval: int = 0,
         starting_stack: float = 50.0,
+        small_blind: int = 1,
+        big_blind: int = 2,
         episode_mode: str = "session",
         league_store: Any | None = None,
     ) -> Path:
@@ -244,6 +246,8 @@ class AgentSnapshotStore:
                 "eval_episodes": max(1, int(eval_episodes)),
                 "league_reroll_interval": max(0, int(league_reroll_interval)),
                 "starting_stack": max(1.0, float(starting_stack)),
+                "small_blind": max(1, int(small_blind)),
+                "big_blind": max(max(1, int(small_blind)), int(big_blind)),
                 "episode_mode": normalize_episode_mode(episode_mode),
             },
             "next_episode_number": 0,
