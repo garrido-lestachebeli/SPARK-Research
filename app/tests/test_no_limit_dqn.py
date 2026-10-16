@@ -7,6 +7,9 @@ import pytest
 from spark.agents import create_agent
 from spark.agents.no_limit_holdem import dqn as dqn_math
 from spark.agents.no_limit_holdem.agent import (
+    CARD_HOLE,
+    CARD_OPPONENT,
+    CARD_SLOTS,
     FEATURE_DIM,
     POT_INDEX,
     SEAT_ALL_IN,
@@ -101,6 +104,63 @@ def test_public_record_hides_opponent_holes_and_marks_a_fold():
     folded = environment.step(0)
     statuses = {seat["seat_id"]: seat["status"] for seat in folded.observation["public"]["seats"]}
     assert statuses[decision.player_id] == "folded"
+
+
+def test_only_full_vision_seats_are_shown_opponent_cards():
+    normal = NoLimitHoldemAdapter(3, starting_stack=50, episode_mode="hand")
+    decision = normal.reset(1)
+    assert normal.full_vision_seats == frozenset()
+    assert decision.observation["full_vision"] is False
+    assert decision.observation["public"]["full_vision"] is False
+    assert "opponent_hole_cards" not in decision.observation["public"]
+    assert normal.hidden_state()["full_vision_seats"] == []
+
+    # Seat 1 sees everything; seats 0 and 2 play normal poker at the same table.
+    table = NoLimitHoldemAdapter(
+        3, starting_stack=50, episode_mode="hand", full_vision_seats=[1]
+    )
+    decision = table.reset(1)
+    hidden = table.hidden_state()["hand_cards"]
+    seen: dict[int, dict] = {}
+    while decision is not None and len(seen) < 3:
+        seen.setdefault(decision.player_id, decision.observation["public"])
+        decision = table.step(1 if 1 in decision.legal_actions else decision.legal_actions[0])
+    assert set(seen) == {0, 1, 2}
+
+    for seat in (0, 2):
+        assert seen[seat]["full_vision"] is False
+        assert "opponent_hole_cards" not in seen[seat]
+        assert CARD_OPPONENT not in encode_public(seen[seat])[:CARD_SLOTS]
+
+    public = seen[1]
+    assert public["full_vision"] is True
+    revealed = public["opponent_hole_cards"]
+    assert set(revealed) == {"0", "2"}
+    for seat, cards in revealed.items():
+        assert cards == hidden[int(seat)]
+        assert len(cards) == 2
+    json.dumps(public)
+    vector = encode_public(public)
+    assert len(vector) == FEATURE_DIM
+    cards = vector[:CARD_SLOTS]
+    assert cards.count(CARD_OPPONENT) == 4
+    assert cards.count(CARD_HOLE) == 2
+
+    with pytest.raises(ValueError):
+        NoLimitHoldemAdapter(2, full_vision_seats=[2])
+    with pytest.raises(ValueError):
+        NoLimitHoldemAdapter(2, full_vision_seats="0")
+
+
+def test_create_environment_accepts_full_vision_seats():
+    from spark.environments import create_environment
+
+    environment = create_environment("no-limit-holdem", 2, full_vision_seats=[0])
+    assert environment.full_vision_seats == frozenset({0})
+    assert environment.sees_all_cards(0) and not environment.sees_all_cards(1)
+    environment.set_full_vision_seats([])
+    assert environment.full_vision_seats == frozenset()
+    assert create_environment("no-limit-holdem", 2).full_vision_seats == frozenset()
 
 
 def test_short_stack_blind_is_visible_as_all_in():

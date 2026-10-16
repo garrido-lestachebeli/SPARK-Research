@@ -184,8 +184,14 @@ function updateRunEnvironmentLabels() {
   const environment = run
     ? state.environmentNames[run.environment] || run.environment
     : "";
+  const seeingSeats = ((run && run.config && run.config.seat_configs) || [])
+    .map((seat, index) => (seat && seat.full_vision ? index : null))
+    .filter((index) => index !== null);
+  const suffix = seeingSeats.length
+    ? ` · seat${seeingSeats.length > 1 ? "s" : ""} ${seeingSeats.join(", ")} see${seeingSeats.length > 1 ? "" : "s"} all cards`
+    : "";
   $("#run-environment").textContent = environment
-    ? `Environment: ${environment}`
+    ? `Environment: ${environment}${suffix}`
     : "";
 }
 
@@ -963,7 +969,7 @@ function leagueMemberCard(member) {
       data-member="${escapeHtml(member.id)}" data-status="${escapeHtml(member.status)}">
       <div class="league-member-header">
         <div>
-          <strong><span class="drag-handle" aria-hidden="true">â ¿</span> ${escapeHtml(member.name)}</strong>
+          <strong><span class="drag-handle" aria-hidden="true">::</span> ${escapeHtml(member.name)}</strong>
           <span>${escapeHtml(member.agent_name || member.agent_id)} · ${escapeHtml(member.source_kind || "blank")}</span>
           <small>
             ${formatNumber(stats.matches)} matches ·
@@ -974,7 +980,7 @@ function leagueMemberCard(member) {
         </div>
         <div class="league-elo">
           ${formatNumber(member.elo)}
-          <small>ELO (placeholder)</small>
+          <small>ELO</small>
         </div>
       </div>
       <div class="league-member-controls">
@@ -987,6 +993,10 @@ function leagueMemberCard(member) {
         <div class="league-member-actions">
           <button type="button" class="league-view" data-member="${escapeHtml(member.id)}">Details</button>
           <button type="button" class="league-copy" data-member="${escapeHtml(member.id)}" data-name="${escapeHtml(member.name)}">Copy</button>
+          ${isTraining
+            ? `<button type="button" class="league-freeze" data-member="${escapeHtml(member.id)}" data-name="${escapeHtml(member.name)}"
+                title="Save this learner's current policy as a new Snapshot member. The original keeps training.">Freeze</button>`
+            : ""}
           <button type="button" class="league-delete danger" data-member="${escapeHtml(member.id)}">Delete</button>
         </div>
       </div>
@@ -1044,6 +1054,25 @@ function bindLeagueMemberActions() {
       }
     });
   });
+  document.querySelectorAll(".league-freeze").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const name = window.prompt(
+        "Name for the frozen snapshot (the original keeps training)",
+        `${button.dataset.name}-frozen`,
+      );
+      if (!name) return;
+      try {
+        const result = await api(
+          `/api/league/members/${encodeURIComponent(button.dataset.member)}/copy`,
+          { method: "POST", body: JSON.stringify({ name, mode: "snapshot" }) },
+        );
+        $("#league-message").textContent = `Frozen as ${result.name} (Snapshot mode).`;
+        await loadLeagueMembers();
+      } catch (error) {
+        $("#league-message").textContent = error.message;
+      }
+    });
+  });
   document.querySelectorAll(".league-delete").forEach((button) => {
     button.addEventListener("click", async () => {
       if (!window.confirm("Delete this league member? This does not delete Agent library snapshots.")) {
@@ -1095,10 +1124,10 @@ async function showLeagueMemberDetails(memberId, { quiet = false } = {}) {
         </div>
         <div class="league-elo">
           ${formatNumber(detail.elo)}
-          <small>ELO (placeholder)</small>
+          <small>ELO</small>
         </div>
       </div>
-      <p class="help">${escapeHtml(detail.elo_note || "ELO is a placeholder.")}</p>
+      <p class="help">${escapeHtml(detail.elo_note || "ELO starts at 1000 and updates from windowed pairwise win rates among League-backed seats.")}</p>
       <div class="league-stat-grid">
         <div class="league-stat"><span>Matches</span><strong>${formatNumber(stats.matches)}</strong></div>
         <div class="league-stat"><span>Wins</span><strong>${formatNumber(stats.wins)}</strong></div>
@@ -1255,6 +1284,7 @@ function renderStartingAgentOptions() {
         mode: seat.querySelector(".seat-mode")?.value,
         snapshotId: seat.querySelector(".seat-snapshot")?.value,
         leagueMemberId: seat.querySelector(".seat-league-member")?.value,
+        fullVision: Boolean(seat.querySelector(".seat-full-vision")?.checked),
       })),
     };
   });
@@ -1328,6 +1358,10 @@ function renderStartingAgentOptions() {
           <div class="seat-league-random-fields ${source === "league_random" ? "" : "hidden"}">
             <p class="help">Drawn from ${league.length} active League member(s). Re-rolls every K episodes (K=0 keeps one).</p>
           </div>
+          <label class="seat-full-vision-label" title="Show this seat every opponent's hole cards. Other seats still see only their own hand. Use it to check a learner is learning when nothing is hidden from it.">
+            <input type="checkbox" class="seat-full-vision" ${oldSeat.fullVision ? "checked" : ""}>
+            Sees all cards
+          </label>
         </div>
       `;
     }).join("");
@@ -1444,34 +1478,36 @@ async function loadCampaigns() {
   const values = await api("/api/campaigns");
   $("#campaign-list").innerHTML = values.map((campaign) => `
     <article class="campaign">
-      <p class="eyebrow">${campaign.id}</p><h3>${campaign.name}</h3>
-      <button class="stop-campaign danger" data-campaign="${campaign.id}">Stop all</button>
-      <button class="resume-campaign" data-campaign="${campaign.id}">Resume all</button>
-      <button class="delete-campaign danger" data-campaign="${campaign.id}" data-name="${escapeHtml(campaign.name)}">Delete all data</button>
+      <p class="eyebrow">${escapeHtml(campaign.id)}</p><h3>${escapeHtml(campaign.name)}</h3>
+      <button class="stop-campaign danger" data-campaign="${escapeHtml(campaign.id)}">Stop all</button>
+      <button class="resume-campaign" data-campaign="${escapeHtml(campaign.id)}">Resume all</button>
+      <button class="delete-campaign danger" data-campaign="${escapeHtml(campaign.id)}" data-name="${escapeHtml(campaign.name)}">Delete all data</button>
       ${campaign.jobs.map((job) => `
         <div class="job">
-          <div><strong>${job.environment}</strong>
-            <small>${job.run_id} · ${job.scheduler_id || "not submitted"}</small>
+          <div><strong>${escapeHtml(job.environment)}</strong>
+            <small>${escapeHtml(job.run_id)} · ${escapeHtml(job.scheduler_id || "not submitted")}</small>
             <small>${(campaign.config?.tables?.[job.environment]?.seats || [])
               .map((seat, index) => {
                 const source = seat.source || "fresh";
+                const agent = escapeHtml(seat.agent_id);
+                const eyes = seat.full_vision ? " [sees all cards]" : "";
                 if (source === "league_random") {
-                  return `Seat ${index}: League random â†’ ${seat.agent_id}`;
+                  return `Seat ${index}: League random -> ${agent}${eyes}`;
                 }
                 if (source === "league_member") {
-                  return `Seat ${index}: League member (${seat.agent_id})`;
+                  return `Seat ${index}: League member (${agent})${eyes}`;
                 }
-                return `Seat ${index}: ${seat.agent_id} (${seat.mode})`;
+                return `Seat ${index}: ${agent} (${escapeHtml(seat.mode)})${eyes}`;
               })
               .join(" · ")}</small></div>
-          <span>${job.run?.status || job.status}</span>
-          <div><button class="danger stop-job" data-run="${job.run_id}">Stop</button>
-          <button class="resume-job" data-run="${job.run_id}">Resume</button>
-          <button class="remove-job danger" data-run="${job.run_id}">Delete data</button></div>
+          <span>${escapeHtml(job.run?.status || job.status)}</span>
+          <div><button class="danger stop-job" data-run="${escapeHtml(job.run_id)}">Stop</button>
+          <button class="resume-job" data-run="${escapeHtml(job.run_id)}">Resume</button>
+          <button class="remove-job danger" data-run="${escapeHtml(job.run_id)}">Delete data</button></div>
         </div>
         <details><summary>Worker logs</summary>
-          <button class="load-logs" data-run="${job.run_id}">Load latest</button>
-          <pre id="logs-${job.run_id}">Not loaded.</pre>
+          <button class="load-logs" data-run="${escapeHtml(job.run_id)}">Load latest</button>
+          <pre id="logs-${escapeHtml(job.run_id)}">Not loaded.</pre>
         </details>`).join("")}
     </article>
   `).join("") || '<p class="help">No campaigns submitted yet.</p>';
@@ -1527,13 +1563,15 @@ async function submitCampaign(event) {
     [...document.querySelectorAll(".table-configuration")].map((table) => {
       const seats = [...table.querySelectorAll(".seat-configuration")].map((seat) => {
         const source = seat.querySelector(".seat-source")?.value || "fresh";
+        const full_vision = Boolean(seat.querySelector(".seat-full-vision")?.checked);
         if (source === "league_random") {
-          return { source: "league_random" };
+          return { source: "league_random", full_vision };
         }
         if (source === "league_member") {
           return {
             source: "league_member",
             league_member_id: seat.querySelector(".seat-league-member")?.value || null,
+            full_vision,
           };
         }
         return {
@@ -1541,6 +1579,7 @@ async function submitCampaign(event) {
           agent_id: seat.querySelector(".seat-agent")?.value,
           mode: seat.querySelector(".seat-mode")?.value || "train",
           snapshot_id: seat.querySelector(".seat-snapshot")?.value || null,
+          full_vision,
         };
       });
       return [
@@ -1620,7 +1659,7 @@ setInterval(() => {
   if (state.activeTab === "overview" && state.selectedRun) {
     tasks.push(loadStatistics());
   }
-  if (state.activeTab !== "league") {
+  if (state.activeTab === "league" || state.activeTab === "campaigns") {
     tasks.push(loadAgentSnapshots(), loadLeagueMembers(), loadAllLeagueMembers());
   }
   Promise.allSettled(tasks).finally(() => {

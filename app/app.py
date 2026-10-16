@@ -46,6 +46,8 @@ class SeatConfigurationRequest(BaseModel):
     mode: Literal["train", "evaluate"] = "train"
     snapshot_id: str | None = None
     league_member_id: str | None = None
+    # Show this seat every opponent's hole cards (learning sanity check).
+    full_vision: bool = False
 
 
 class TableConfigurationRequest(BaseModel):
@@ -99,6 +101,8 @@ class LeagueMemberImportRequest(BaseModel):
 
 class LeagueMemberCopyRequest(BaseModel):
     name: str = Field(min_length=1, max_length=100)
+    # None keeps the source's mode; "snapshot" freezes the copy.
+    mode: Literal["train", "snapshot"] | None = None
 
 
 class LeagueMemberPatchRequest(BaseModel):
@@ -252,7 +256,7 @@ def import_league_member(request: LeagueMemberImportRequest) -> dict[str, Any]:
 @app.post("/api/league/members/{member_id}/copy")
 def copy_league_member(member_id: str, request: LeagueMemberCopyRequest) -> dict[str, Any]:
     try:
-        return league_members.copy_member(member_id, request.name)
+        return league_members.copy_member(member_id, request.name, mode=request.mode)
     except LeagueMemberNotFound as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
     except LeagueError as error:
@@ -399,6 +403,8 @@ def run_statistics(run_id: str) -> dict[str, Any]:
         return runs.statistics(run_id)
     except FileNotFoundError as error:
         raise HTTPException(status_code=404, detail="Run not found.") from error
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
 
 
 @app.get("/api/runs/{run_id}/episodes")
@@ -412,6 +418,8 @@ def run_episodes(
         return runs.list_episodes(run_id, limit, offset, outcome)
     except FileNotFoundError as error:
         raise HTTPException(status_code=404, detail="Run not found.") from error
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
 
 
 @app.get("/api/runs/{run_id}/episodes/{episode_id}")
@@ -420,6 +428,8 @@ def get_episode(run_id: str, episode_id: int) -> dict[str, Any]:
         episode = runs.episode(run_id, episode_id)
     except FileNotFoundError as error:
         raise HTTPException(status_code=404, detail="Run not found.") from error
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
     if episode is None:
         raise HTTPException(status_code=404, detail="Episode not found.")
     return episode
@@ -431,4 +441,6 @@ def export_run(run_id: str) -> FileResponse:
         path = runs.export(run_id)
     except FileNotFoundError as error:
         raise HTTPException(status_code=404, detail="Run not found.") from error
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
     return FileResponse(path, filename=path.name, media_type="application/json")

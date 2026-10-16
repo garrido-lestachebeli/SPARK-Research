@@ -19,9 +19,13 @@ import copy
 from typing import Any
 
 from spark.agents.base import Agent
-from spark.agents.no_limit_holdem.agent import (
+from spark.agents.no_limit_holdem.agent import (  # noqa: F401 - card codes re-exported
     ACTION_DIM,
     ACTION_NAMES,
+    CARD_BOARD,
+    CARD_HOLE,
+    CARD_OPPONENT,
+    CARD_UNSEEN,
     FEATURE_DIM,
     encode_observation,
     terminal_reward,
@@ -54,10 +58,8 @@ RAISE_HALF_POT = 2
 RAISE_POT = 3
 ALL_IN = 4
 
-# Card codes in the first 52 slots of the public vector.
-CARD_UNSEEN = 0.0
-CARD_BOARD = 1.0
-CARD_HOLE = 2.0
+# Card codes in the first 52 slots of the public vector are shared with every
+# No-Limit agent: CARD_UNSEEN, CARD_BOARD, CARD_HOLE, CARD_OPPONENT in agent.py.
 
 # Illegal Q-values are pushed below every legal action inside the forward pass.
 _ILLEGAL_Q = -1.0e9

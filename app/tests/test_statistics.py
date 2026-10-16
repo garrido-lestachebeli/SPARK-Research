@@ -34,6 +34,49 @@ def test_statistics_include_confidence_intervals(tmp_path):
     assert stats["highlights"]["seat_0_win_rate_ci"][0] <= stats["highlights"]["seat_0_win_rate"]
 
 
+def test_statistics_rolling_series_stays_capped(tmp_path):
+    database = RunDatabase(tmp_path / "long" / "run.sqlite")
+    database.create_run("long", "leduc-holdem", "leduc-random", 0, {})
+    now = "2020-01-01T00:00:00+00:00"
+    rows = [
+        (
+            "long",
+            episode,
+            "leduc-holdem",
+            0,
+            0,
+            now,
+            now,
+            0.1,
+            "[1.0, -1.0]",
+            '["win", "loss"]',
+            0,
+            1,
+            2,
+            "{}",
+        )
+        for episode in range(1, 501)
+    ]
+    with database.connect() as connection:
+        connection.executemany(
+            """
+            INSERT INTO episodes (
+                run_id, episode_number, environment, seed, agent_version,
+                started_at, completed_at, duration_seconds, payoffs_json,
+                outcomes_json, winner, schema_version, step_count, actions_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            rows,
+        )
+
+    stats = database.statistics()
+    assert stats["episodes"] == 500
+    assert len(stats["rolling"]) <= 400
+    assert stats["rolling"][0]["episode"] == 1
+    assert stats["rolling"][-1]["episode"] == 500
+    assert stats["rolling"][-1]["seats"]["0"]["cumulative_average"] == 1.0
+
+
 def test_q_table_size_series_reports_distinct_states(tmp_path):
     Trainer(
         TrainerConfig(
@@ -54,8 +97,7 @@ def test_q_table_size_series_reports_distinct_states(tmp_path):
     assert len(points) <= 401
     assert points[0] == {"episode": 0, "states": 0}
     assert points[-1] == {"episode": 899, "states": 899}
-    stats = database.statistics()
-    assert stats["q_table_size"]["seats"]["0"][-1]["states"] == 899
+    assert "q_table_size" not in database.statistics()
 
 
 def evaluation_rows(payoffs, *, seat=0, member="league-a", name="A"):

@@ -50,6 +50,27 @@ def normalize_episode_mode(value: Any) -> str:
     return mode
 
 
+def normalize_full_vision_seats(value: Any, num_players: int) -> frozenset[int]:
+    """Validate the set of seats that are shown every opponent's hole cards.
+
+    Normal poker is the empty set. A seat in this set receives
+    ``public["opponent_hole_cards"]`` on its turn; every other seat still sees
+    only its own hand, so one learner can be given perfect information while
+    its opponents play real poker.
+    """
+    if value is None:
+        return frozenset()
+    if isinstance(value, (str, bytes)) or not hasattr(value, "__iter__"):
+        raise ValueError("full_vision_seats must be a list of seat indexes.")
+    seats = frozenset(int(seat) for seat in value)
+    bad = sorted(seat for seat in seats if not 0 <= seat < int(num_players))
+    if bad:
+        raise ValueError(
+            f"full_vision_seats {bad} are outside 0-{int(num_players) - 1}."
+        )
+    return seats
+
+
 def jsonify(value: Any) -> Any:
     if isinstance(value, dict):
         return {str(key): jsonify(item) for key, item in value.items()}
@@ -89,6 +110,7 @@ class RLCardPokerAdapter(EnvironmentAdapter):
         big_blind: int = DEFAULT_BIG_BLIND,
         max_hands: int = DEFAULT_MAX_HANDS,
         episode_mode: str = DEFAULT_EPISODE_MODE,
+        full_vision_seats: Any = None,
     ) -> None:
         self.num_players = int(num_players)
         self.small_blind = max(1, int(small_blind))
@@ -100,6 +122,8 @@ class RLCardPokerAdapter(EnvironmentAdapter):
                 f"{self.big_blind}."
             )
         self.episode_mode = normalize_episode_mode(episode_mode)
+        self.full_vision_seats: frozenset[int] = frozenset()
+        self.set_full_vision_seats(full_vision_seats)
         # Single-hand mode always ends after the first hand, regardless of stack.
         self.max_hands = 1 if self.episode_mode == "hand" else max(1, int(max_hands))
         self._env = None
@@ -112,6 +136,13 @@ class RLCardPokerAdapter(EnvironmentAdapter):
         self._action_log: list[dict[str, Any]] = []
         self._big_blind = float(self.big_blind)
         self._small_blind = float(self.small_blind)
+
+    def set_full_vision_seats(self, seats: Any) -> None:
+        """Choose which seats are shown opponents' hole cards (empty = none)."""
+        self.full_vision_seats = normalize_full_vision_seats(seats, self.num_players)
+
+    def sees_all_cards(self, player_id: int) -> bool:
+        return int(player_id) in self.full_vision_seats
 
     def reset(self, seed: int) -> Decision:
         self._base_seed = int(seed)
@@ -163,6 +194,7 @@ class RLCardPokerAdapter(EnvironmentAdapter):
                 "small_blind": self._small_blind,
                 "big_blind": self._big_blind,
                 "episode_mode": self.episode_mode,
+                "full_vision_seats": sorted(self.full_vision_seats),
             }
         try:
             info = dict(self._env.get_perfect_information())
@@ -181,6 +213,7 @@ class RLCardPokerAdapter(EnvironmentAdapter):
         info["small_blind"] = self._small_blind
         info["big_blind"] = self._big_blind
         info["episode_mode"] = self.episode_mode
+        info["full_vision_seats"] = sorted(self.full_vision_seats)
         return info
 
     def _start_hand(self) -> Decision:
@@ -255,6 +288,7 @@ class RLCardPokerAdapter(EnvironmentAdapter):
             "small_blind": self._small_blind,
             "big_blind": self._big_blind,
             "episode_mode": self.episode_mode,
+            "full_vision": self.sees_all_cards(player_id),
         }
         return Decision(
             player_id=int(player_id),

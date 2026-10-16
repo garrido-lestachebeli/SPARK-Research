@@ -57,10 +57,10 @@ def test_agent_scripts_are_discovered_and_q_agent_evaluates_greedily():
         for error in discovery_errors()
     )
     agent = create_agent("leduc-q", seed=4)
-    state = (0.0,) * 36
-    agent.q[state][1] = 10.0
+    observation = {"encoded": [0.0] * 36}
+    agent.q[agent.encode(observation)][1] = 10.0
     agent.set_training(False)
-    assert agent.select_action({"encoded": list(state)}, [0, 1, 2], 0) == 1
+    assert agent.select_action(observation, [0, 1, 2], 0) == 1
 
 
 def _assert_valid_action_probs(probs: dict, legal_actions: list[int]) -> None:
@@ -79,10 +79,9 @@ def test_base_action_probs_are_uniform_over_legal_actions():
 
 def test_q_action_probs_match_epsilon_greedy_and_greedy_eval():
     agent = create_agent("leduc-q", seed=0, config={"epsilon": 0.2})
-    state = (0.0,) * 36
-    agent.q[state][1] = 10.0
+    observation = {"encoded": [0.0] * 36}
+    agent.q[agent.encode(observation)][1] = 10.0
     legal = [0, 1, 2]
-    observation = {"encoded": list(state)}
 
     agent.set_training(True)
     train_probs = agent.action_probs(observation, legal)

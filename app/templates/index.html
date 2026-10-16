@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>SPARK Training Console</title>
   <!-- Relative paths so Open OnDemand /rnode and /node proxies work. -->
-  <link rel="stylesheet" href="static/style.css?v=overview-3">
+  <link rel="stylesheet" href="static/style.css?v=overview-4">
 </head>
 <body>
   <header class="topbar">
@@ -184,6 +184,9 @@
             Starting stack is the chip buy-in for each seat. Small blind and big blind
             are posted at the start of each Hold'em hand. The big blind must be at
             least the small blind, and the starting stack must cover the big blind.
+            Tick <strong>Sees all cards</strong> on a seat to show that one agent every
+            opponent's hole cards while the rest of the table plays normal poker. Use it
+            to check that a learner improves when nothing is hidden from it, then untick.
           </p>
           <button type="submit" class="primary">Submit campaign</button>
           <p id="campaign-message" class="message"></p>
@@ -245,7 +248,8 @@
         Manage agents for future league training. Drag an agent card between the
         League (active) and Bench (sidelined) columns. Use each card's switch to set
         Training (learns while playing) or Snapshot (frozen); implementations that
-        cannot train stay frozen. ELO is a placeholder and is not updated yet.
+        cannot train stay frozen. ELO starts at 1000 and updates from windowed
+        pairwise win rates among League-backed seats.
       </p>
 
       <div class="split league-forms">
@@ -316,6 +320,6 @@
 
   </main>
 
-  <script src="static/app.js?v=overview-4"></script>
+  <script src="static/app.js?v=overview-6"></script>
 </body>
 </html>

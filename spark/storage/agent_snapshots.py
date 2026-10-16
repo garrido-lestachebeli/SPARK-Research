@@ -222,6 +222,7 @@ class AgentSnapshotStore:
                     "mode": mode,
                     "snapshot_id": snapshot_id,
                     "league_member_id": league_member_id,
+                    "full_vision": bool(value.get("full_vision", False)),
                 }
             )
         run_path = Path(runs_directory).resolve() / run_id

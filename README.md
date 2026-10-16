@@ -3,8 +3,8 @@
 Infrastructure for reinforcement-learning research in imperfect-information poker.  
 SPARK trains agents on **Leduc**, **Limit Texas**, and **No-Limit Texas Hold'em**  
 ([RLCard](https://github.com/datamllab/rlcard)), runs campaigns locally or on the  
-MSOE ROSIE cluster, and ships a dashboard for League opponents, ELO tracking, and  
-full episode replay (visible + hidden state).
+MSOE ROSIE cluster, and ships a dashboard for League opponents, ELO tracking, and
+training statistics.
 
 **Core ideas**
 
@@ -116,7 +116,7 @@ Open [http://127.0.0.1:8000](http://127.0.0.1:8000). Without `SPARK_LOCAL_JOBS=1
 (and without Slurm), you can browse runs but not start new workers.
 
 From the UI: launch campaigns, seat players, monitor/stop jobs, manage the League,
-view stats, and replay episodes. **Delete data** on a job or campaign removes that
+and view statistics. **Delete data** on a job or campaign removes that
 run’s files under `data/` (League members and Agent library snapshots are kept).
 
 ## Campaigns, League, and episodes

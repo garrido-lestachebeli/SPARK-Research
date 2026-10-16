@@ -112,6 +112,18 @@ def build_parser() -> argparse.ArgumentParser:
             "hand = one poker hand per episode."
         ),
     )
+    parser.add_argument(
+        "--full-vision-seats",
+        type=int,
+        nargs="*",
+        default=[],
+        metavar="SEAT",
+        help=(
+            "Seat indexes that are shown every opponent's hole cards (learning "
+            "check). Other seats play normal poker. Seat configs may also set "
+            '"full_vision": true.'
+        ),
+    )
     return parser
 
 
@@ -148,6 +160,7 @@ def main() -> None:
             small_blind=max(1, int(args.small_blind)),
             big_blind=max(1, int(args.big_blind)),
             episode_mode=args.episode_mode,
+            full_vision_seats=list(args.full_vision_seats or []),
         )
     )
     completed = trainer.run(resume=not args.no_resume)

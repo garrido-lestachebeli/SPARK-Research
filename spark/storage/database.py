@@ -439,7 +439,9 @@ class RunDatabase:
             ],
         )
 
-    def statistics(self, *, rolling_limit: int = 100) -> dict[str, Any]:
+    def statistics(
+        self, *, rolling_limit: int = 100, rolling_points: int = 400
+    ) -> dict[str, Any]:
         with self.connect(readonly=True) as connection:
             version_column = (
                 "agent_version"
@@ -505,7 +507,8 @@ class RunDatabase:
         cumulative_by_seat: dict[int, float] = {}
         action_totals: dict[tuple[str, int], int] = {}
         metadata_step_counts: list[float] = []
-        for row in payoff_rows:
+        sample_indexes = self._downsample_indexes(len(payoff_rows), rolling_points)
+        for row_index, row in enumerate(payoff_rows):
             payoffs = [float(value) for value in json.loads(row["payoffs_json"])]
             outcomes = json.loads(row["outcomes_json"])
             durations.append(float(row["duration_seconds"] or 0))
@@ -522,7 +525,8 @@ class RunDatabase:
                 for action_name, count in dict(by_action).items():
                     key = (str(action_name), seat_id)
                     action_totals[key] = action_totals.get(key, 0) + int(count)
-            episode_index = len(rolling) + 1
+            episode_index = row_index + 1
+            sampled = row_index in sample_indexes
             seat_points: dict[str, dict[str, Any]] = {}
             for seat, payoff in enumerate(payoffs):
                 window = recent_by_seat.setdefault(seat, [])
@@ -533,12 +537,15 @@ class RunDatabase:
                 recent_by_seat[seat] = window
                 recent_sum_by_seat[seat] = window_sum
                 cumulative_by_seat[seat] = cumulative_by_seat.get(seat, 0.0) + payoff
-                seat_points[str(seat)] = {
-                    "average_payoff": window_sum / len(window),
-                    "ci_low": None,
-                    "ci_high": None,
-                    "cumulative_average": cumulative_by_seat[seat] / episode_index,
-                }
+                if sampled:
+                    seat_points[str(seat)] = {
+                        "average_payoff": window_sum / len(window),
+                        "ci_low": None,
+                        "ci_high": None,
+                        "cumulative_average": cumulative_by_seat[seat] / episode_index,
+                    }
+            if not sampled:
+                continue
             seat_zero = seat_points.get("0", {})
             rolling.append(
                 {
@@ -654,7 +661,6 @@ class RunDatabase:
                 ],
                 "seat_0_std_payoff": seat_zero["std"],
             },
-            "q_table_size": self.q_table_size_series(),
         }
 
     def q_table_size_series(self, *, max_points: int = 400) -> dict[str, Any]:
@@ -702,19 +708,24 @@ class RunDatabase:
         }
 
     @staticmethod
-    def _downsample_series(
-        points: list[dict[str, int]],
-        max_points: int,
-    ) -> list[dict[str, int]]:
-        if len(points) <= max_points or max_points < 2:
-            return points
-        last = len(points) - 1
+    def _downsample_indexes(count: int, max_points: int) -> set[int]:
+        if count <= max_points or max_points < 2:
+            return set(range(count))
+        last = count - 1
         indexes = {
             min(last, round(index * last / (max_points - 1)))
             for index in range(max_points)
         }
         indexes.add(0)
         indexes.add(last)
+        return indexes
+
+    @staticmethod
+    def _downsample_series(
+        points: list[dict[str, int]],
+        max_points: int,
+    ) -> list[dict[str, int]]:
+        indexes = RunDatabase._downsample_indexes(len(points), max_points)
         return [points[index] for index in sorted(indexes)]
 
     def save_evaluation_episodes(self, rows: list[dict[str, Any]]) -> int:

@@ -50,6 +50,10 @@ class TrainerConfig:
     small_blind: int = DEFAULT_SMALL_BLIND
     big_blind: int = DEFAULT_BIG_BLIND
     episode_mode: str = DEFAULT_EPISODE_MODE
+    # Seats that are shown every opponent's hole cards. Each seat config may
+    # also carry ``"full_vision": true``; this list is the CLI shortcut for the
+    # ``--agents`` form. Everyone else plays normal poker.
+    full_vision_seats: list[int] | None = None
     eval_interval: int = 0
     eval_episodes: int = 20
 
@@ -57,6 +61,13 @@ class TrainerConfig:
 # Evaluation seeds live far above any plausible training episode number so a
 # test hand is never a replay of a hand the agent already learned from.
 EVAL_SEED_OFFSET = 1_000_000_000
+
+
+def _truthy(value: Any) -> bool:
+    """Read a seat-config flag that may arrive as a bool, int, or string."""
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on", "full"}
+    return bool(value)
 # Fallback ELO window when evaluation sweeps are disabled. A one-episode window
 # would make every win rate 0.0 or 1.0 and swing ratings by a full K factor.
 DEFAULT_ELO_WINDOW = 100
@@ -75,20 +86,18 @@ class Trainer:
                 f"{self.config.big_blind}."
             )
         self.config.episode_mode = normalize_episode_mode(config.episode_mode)
+        self.config.full_vision_seats = sorted(
+            {int(seat) for seat in (config.full_vision_seats or [])}
+        )
         self.config.eval_interval = max(0, int(config.eval_interval))
         self.config.eval_episodes = max(1, int(config.eval_episodes))
         self.run_path = Path(config.run_directory) / config.run_id
         self.run_path.mkdir(parents=True, exist_ok=True)
         self.database = RunDatabase(self.run_path / "run.sqlite")
-        self.environment = create_environment(
-            config.environment,
-            config.table_size,
-            starting_stack=self.config.starting_stack,
-            small_blind=self.config.small_blind,
-            big_blind=self.config.big_blind,
-            episode_mode=self.config.episode_mode,
-        )
+        self.seat_configs: list[dict[str, Any]] = []
+        self.environment = self._create_environment()
         self.seat_configs = self._normalize_seat_configs()
+        self._apply_full_vision(self.environment)
         self.agents: dict[int, Agent] = self._create_agents()
         self.agent_version = 0
         self.next_episode_number = 0
@@ -108,6 +117,37 @@ class Trainer:
             asdict(config),
         )
         self._install_signal_handlers()
+
+    def _create_environment(self) -> Any:
+        """Build a table from the current config (training, eval, and reload share it)."""
+        environment = create_environment(
+            self.config.environment,
+            self.config.table_size,
+            starting_stack=self.config.starting_stack,
+            small_blind=self.config.small_blind,
+            big_blind=self.config.big_blind,
+            episode_mode=self.config.episode_mode,
+        )
+        self._apply_full_vision(environment)
+        return environment
+
+    def full_vision_seats(self) -> list[int]:
+        """Seats flagged ``full_vision`` in their seat config."""
+        return [
+            seat
+            for seat, seat_config in enumerate(self.seat_configs)
+            if bool(seat_config.get("full_vision"))
+        ]
+
+    def _apply_full_vision(self, environment: Any) -> None:
+        setter = getattr(environment, "set_full_vision_seats", None)
+        seats = self.full_vision_seats()
+        if setter is not None:
+            setter(seats)
+        elif seats:
+            raise ValueError(
+                f"{self.config.environment} does not support full vision seats."
+            )
 
     def _create_agents(self) -> dict[int, Agent]:
         agents: dict[int, Agent] = {}
@@ -179,6 +219,7 @@ class Trainer:
                 f"received {len(values)}."
             )
         normalized: list[dict[str, Any]] = []
+        cli_full_vision = set(self.config.full_vision_seats or [])
         for seat, value in enumerate(values):
             agent_id = str(value.get("agent_id", "")).strip()
             mode = str(value.get("mode", "train")).lower()
@@ -196,6 +237,8 @@ class Trainer:
                     "mode": mode,
                     "snapshot_id": value.get("snapshot_id"),
                     "league_member_id": value.get("league_member_id"),
+                    "full_vision": _truthy(value.get("full_vision"))
+                    or seat in cli_full_vision,
                 }
             )
         return normalized
@@ -442,14 +485,7 @@ class Trainer:
     def _evaluation_environment(self) -> Any:
         """A dedicated environment so a sweep never disturbs the training table."""
         if self._eval_environment is None:
-            self._eval_environment = create_environment(
-                self.config.environment,
-                self.config.table_size,
-                starting_stack=self.config.starting_stack,
-                small_blind=self.config.small_blind,
-                big_blind=self.config.big_blind,
-                episode_mode=self.config.episode_mode,
-            )
+            self._eval_environment = self._create_environment()
         return self._eval_environment
 
     def _frozen_agent(self, agent_id: str, state: dict[str, Any], seat: int) -> Agent:
@@ -730,15 +766,13 @@ class Trainer:
             key in saved_config
             for key in ("starting_stack", "small_blind", "big_blind", "episode_mode")
         ):
-            self.environment = create_environment(
-                self.config.environment,
-                self.config.table_size,
-                starting_stack=self.config.starting_stack,
-                small_blind=self.config.small_blind,
-                big_blind=self.config.big_blind,
-                episode_mode=self.config.episode_mode,
-            )
+            self.environment = self._create_environment()
             self._eval_environment = None
+        else:
+            # Seat configs may have changed which seats see every card.
+            self._apply_full_vision(self.environment)
+            if self._eval_environment is not None:
+                self._apply_full_vision(self._eval_environment)
         self.database.add_event(
             "resumed", f"Loaded checkpoint at episode {self.next_episode_number}."
         )

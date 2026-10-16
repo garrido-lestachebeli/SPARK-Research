@@ -51,6 +51,15 @@ def test_league_blank_import_copy_move_and_delete(tmp_path):
     full = league.get(copied["id"])
     assert "q_table" in full["state"] or copied["agent_id"] == "leduc-random"
 
+    # Freeze: the copy is a Snapshot that keeps today's weights; the source
+    # stays in Training mode.
+    frozen = league.freeze_member(blank["id"], "Fresh Q frozen")
+    assert frozen["mode"] == "snapshot"
+    assert frozen["source_kind"] == "frozen"
+    assert league.get(frozen["id"])["state"] == league.get(blank["id"])["state"]
+    assert league.get(blank["id"])["mode"] == "train"
+    assert league.copy_member(blank["id"], "Still training", mode="train")["mode"] == "train"
+
     moved = league.set_status(blank["id"], "bench")
     assert moved["status"] == "bench"
     renamed = league.rename(blank["id"], "Renamed Q")

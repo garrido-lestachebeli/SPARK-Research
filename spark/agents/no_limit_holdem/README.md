@@ -92,9 +92,11 @@ on the dictionary for logs. Do not train on it. It cannot tell a card in the
 hand from the same card on the board, and it has no per-seat fold or all-in flag.
 
 `observation["raw"]` is the same hand in RLCard's own keys. `public` is the
-stable record built from it. Hidden opponent hole cards are not in either one.
-They live only in `environment.hidden_state()`, which is stored for replay and
-must not be passed into the network.
+stable record built from it. In normal play hidden opponent hole cards are not
+in either one. They live only in `environment.hidden_state()`, which is stored
+for replay and must not be passed into the network. The one exception is a
+seat with **Sees all cards** ticked, described below, which deliberately gets
+them in `public["opponent_hole_cards"]`.
 
 `observation["stacks"]` and `observation["my_stack"]` are the session buy-in
 totals. They update when a hand ends. During a hand, the chips that matter are
@@ -117,6 +119,11 @@ public = {
     "hero_seat": 1,               # seat index of the player to act
     "dealer_button": 1,           # seat index the button sits on this hand
     "num_players": 3,
+    "full_vision": False,         # True when this seat has "Sees all cards" ticked
+    "opponent_hole_cards": {      # ONLY present when full_vision is True
+        "0": ["H9", "C9"],        # seat id -> that seat's two cards
+        "2": ["DK", "S4"],
+    },
     "seats": [
         {
             "seat_id": 0,
@@ -176,7 +183,7 @@ instead would turn both into `1.0`.
 
 | Indexes | Contents |
 | --- | --- |
-| 0–51 | One slot per card. `0` unseen, `1` on the board, `2` in this player's hand. |
+| 0–51 | One slot per card. `0` unseen, `1` on the board, `2` in this player's hand, `3` in an opponent's hand (only for a seat with "Sees all cards" ticked). |
 | 52–55 | Street, one-hot. 52 preflop, 53 flop, 54 turn, 55 river. |
 | 56 | Pot, in big blinds. |
 | 57 | Amount still needed to call, in big blinds. |
@@ -208,6 +215,36 @@ five `0/1` numbers if you want it for debugging.
 This vector is a Markov view of the decision. Current cards, stacks,
 commitments, who has folded, who is all-in, and where the button sits already
 summarize the betting. The action history does not need to go into the network.
+
+The card codes are named in `agent.py`: `CARD_UNSEEN = 0`, `CARD_BOARD = 1`,
+`CARD_HOLE = 2`, `CARD_OPPONENT = 3`.
+
+### Sees all cards: one seat with perfect information
+
+Every seat on the campaign form has a **Sees all cards** tick box. It is a
+property of the seat, not the table, so one learner can be shown everything
+while its opponents keep playing real poker. In a seat config it is
+`"full_vision": true`; the CLI shortcut for the `--agents` form is
+`--full-vision-seats 0`.
+
+- Unticked (default) is normal poker. `public["full_vision"]` is `False`,
+  `public` never contains an opponent's cards, and code `3` never appears in
+  that seat's vector.
+- Ticked: `public["full_vision"]` is `True` and `public["opponent_hole_cards"]`
+  maps every other seat id to that seat's two cards. `encode()` writes those
+  cards as `3` in the 52 card slots.
+
+Use it as a learning check. If a learner cannot beat Call Only even when it can
+see every card, the problem is the network or the update, not the hidden
+information. Leave the opponents unticked so the test is still "can it exploit
+what it knows", and untick the learner again once it clears that bar. The
+built-in bots read only their own cards, so ticking them changes nothing.
+
+The vector is 118 numbers either way, so the same saved network loads in both
+settings. A learner trained unticked can continue ticked and back without a
+new member. With three or more players, code `3` says a card is in some
+opponent's hand but not whose. Heads-up it is exact. The environment records
+the chosen seats as `full_vision_seats` in `hidden_state()`.
 
 ## Reward and gamma
 
@@ -409,3 +446,48 @@ start value until `build_q_network` returns a module.
 
 The same three bots are seeded into the league for `no-limit-holdem` when the
 dashboard loads built-in opponents.
+
+Add `--full-vision-seats 0` to the first command to show seat 0 every
+opponent's cards. With `--seat-config`, put `"full_vision":true` on the seat
+instead.
+
+## Keeping one learner across campaigns
+
+Inside a run the trainer never resets an agent between episodes. It builds one
+`NoLimitHoldemDQNAgent` per seat when the run starts and reuses that object for
+every hand, so the network, epsilon, the gradient-step counter, and the replay
+buffer all carry forward. Only the per-hand belief is cleared.
+
+To keep one learner across *several* runs, make it a **League member in
+Training mode**:
+
+1. League tab → **Blank agent**, implementation `No-Limit DQN`, mode
+   Training. This writes the agent's fresh `state_dict` to a member file.
+2. Campaign tab → seat source **League member**, pick that member. The
+   campaign's first checkpoint is built from the member's saved state.
+3. While the run plays, the trainer writes the agent's `state_dict` back onto
+   the member at every checkpoint interval and when the run stops. Network
+   weights, epsilon, and `gradient_steps` are in that state.
+4. The next campaign that seats the same member continues from the updated
+   weights. Train against the bots first with **Sees all cards** unticked,
+   then run the same member again with it ticked on the learner's seat only.
+
+The replay buffer is **not** written to the member (it would make the file
+enormous), so a new run starts with an empty buffer and plays `batch_size`
+transitions before its first gradient step. Weights and epsilon do carry over.
+
+Two `no-limit-dqn` seats at one table are two separate learners with separate
+weights. Seat the same member twice if you want them to start identical.
+
+### Freezing a policy
+
+On the League tab every Training member has a **Freeze** button. It copies the
+member's current state into a new member in **Snapshot** mode. The copy plays
+greedily (epsilon off) and never updates; the original keeps training. Freeze
+before ticking **Sees all cards** so the pure-poker policy is kept, and freeze
+again at milestones to build a ladder of opponents for evaluation.
+
+Through the API, Freeze is `POST /api/league/members/{id}/copy` with
+`{"name": "...", "mode": "snapshot"}`. The **Save agent** form on the Overview
+tab does the same thing from a run's `checkpoint.json` into the Agent library;
+import that snapshot into the League to play against it.

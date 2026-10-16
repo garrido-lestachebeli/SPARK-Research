@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
+from typing import Any
 
 from spark.models import EnvironmentInfo
 
@@ -60,6 +61,7 @@ def create_environment(
     big_blind: int | None = None,
     max_hands: int | None = None,
     episode_mode: str | None = None,
+    full_vision_seats: Iterable[int] | None = None,
 ) -> EnvironmentAdapter:
     info = _INFO.get(environment_id)
     if info is None:
@@ -73,7 +75,7 @@ def create_environment(
         raise ValueError(
             f"{environment_id} supports {info.min_players}-{info.max_players} players."
         )
-    kwargs: dict[str, float | int | str] = {}
+    kwargs: dict[str, Any] = {}
     if starting_stack is not None:
         kwargs["starting_stack"] = float(starting_stack)
     if small_blind is not None:
@@ -84,6 +86,8 @@ def create_environment(
         kwargs["max_hands"] = int(max_hands)
     if episode_mode is not None:
         kwargs["episode_mode"] = str(episode_mode)
+    if full_vision_seats is not None:
+        kwargs["full_vision_seats"] = [int(seat) for seat in full_vision_seats]
     return _FACTORIES[environment_id](table_size, **kwargs)
 
 

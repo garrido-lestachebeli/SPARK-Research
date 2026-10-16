@@ -310,3 +310,157 @@ def test_league_random_reroll_persists_and_swaps(tmp_path):
     # Prior training state was written back at least once.
     saved = league.get(first["id"])
     assert "state" in saved
+
+
+def test_full_vision_seat_flag_reaches_the_table(tmp_path):
+    """Only the ticked seat is shown opponents' cards, in training and eval,
+    and the setting survives a checkpoint reload."""
+    seats = [
+        {"source": "fresh", "agent_id": "no-limit-random", "mode": "train", "full_vision": True},
+        {"source": "fresh", "agent_id": "no-limit-call-only", "mode": "evaluate"},
+    ]
+    trainer = Trainer(
+        TrainerConfig(
+            run_id="vision",
+            environment="no-limit-holdem",
+            run_directory=str(tmp_path),
+            episode_limit=2,
+            checkpoint_interval=1,
+            episode_mode="hand",
+            seat_configs=seats,
+        )
+    )
+    assert trainer.full_vision_seats() == [0]
+    assert trainer.environment.full_vision_seats == frozenset({0})
+    assert trainer._evaluation_environment().full_vision_seats == frozenset({0})
+    trainer.run()
+
+    seen: dict[int, bool] = {}
+    decision = trainer.environment.reset(3)
+    while decision is not None and len(seen) < 2:
+        public = decision.observation["public"]
+        seen.setdefault(decision.player_id, "opponent_hole_cards" in public)
+        decision = trainer.environment.step(decision.legal_actions[-1])
+    assert seen == {0: True, 1: False}
+
+    resumed = Trainer(
+        TrainerConfig(
+            run_id="vision",
+            environment="no-limit-holdem",
+            run_directory=str(tmp_path),
+            episode_limit=3,
+            checkpoint_interval=1,
+            episode_mode="hand",
+            seat_configs=seats,
+        )
+    )
+    resumed.load_checkpoint()
+    assert resumed.seat_configs[0]["full_vision"] is True
+    assert resumed.seat_configs[1]["full_vision"] is False
+    assert resumed.environment.full_vision_seats == frozenset({0})
+
+    # The CLI shortcut marks seats by index when --agents is used.
+    shortcut = Trainer(
+        TrainerConfig(
+            run_id="vision-cli",
+            environment="no-limit-holdem",
+            run_directory=str(tmp_path),
+            episode_limit=1,
+            episode_mode="hand",
+            agents=["no-limit-random", "no-limit-call-only"],
+            full_vision_seats=[1],
+        )
+    )
+    assert shortcut.environment.full_vision_seats == frozenset({1})
+
+
+def _tiny_q_network(state_dim: int, action_dim: int):
+    import torch.nn as nn
+
+    return nn.Sequential(nn.Linear(int(state_dim), 8), nn.ReLU(), nn.Linear(8, int(action_dim)))
+
+
+def _materialized_trainer(runs_directory: Path, run_id: str, member: dict, episodes: int) -> Trainer:
+    from spark.storage import AgentSnapshotStore
+
+    seats = [
+        {
+            "source": "league_member",
+            "agent_id": member["agent_id"],
+            "mode": "train",
+            "league_member_id": member["id"],
+        },
+        {"source": "fresh", "agent_id": "no-limit-call-only", "mode": "evaluate"},
+    ]
+    AgentSnapshotStore(runs_directory).materialize_lineup_checkpoint(
+        run_id=run_id,
+        environment="no-limit-holdem",
+        table_size=2,
+        seat_configs=seats,
+        seed=5,
+        runs_directory=runs_directory,
+        checkpoint_interval=10,
+        episode_limit=episodes,
+        agent_memory_size=0,
+        episode_mode="hand",
+    )
+    return Trainer(
+        TrainerConfig(
+            run_id=run_id,
+            environment="no-limit-holdem",
+            run_directory=str(runs_directory),
+            episode_limit=episodes,
+            checkpoint_interval=10,
+            agent_memory_size=0,
+            episode_mode="hand",
+            seat_configs=seats,
+        )
+    )
+
+
+def test_training_league_member_carries_dqn_weights_across_runs(tmp_path, monkeypatch):
+    """One learner outlives a run: its weights land back on the League member.
+
+    The next campaign that seats the same member picks up where it stopped,
+    and a frozen copy taken in between keeps the earlier policy untouched.
+    """
+    pytest.importorskip("torch")
+    from spark.agents.no_limit_holdem import dqn
+    from spark.storage import LeagueMemberStore
+
+    monkeypatch.setattr(dqn, "build_q_network", _tiny_q_network)
+    league = LeagueMemberStore(tmp_path)
+    learner = league.create_blank("Learner", "no-limit-holdem", "no-limit-dqn")
+    assert learner["mode"] == "train"
+    assert league.get(learner["id"])["state"].get("q_network") is None
+
+    first = _materialized_trainer(tmp_path, "phase-1", learner, episodes=60)
+    first.run()
+    after_first = league.get(learner["id"])["state"]
+    steps_after_first = int(after_first["gradient_steps"])
+    assert steps_after_first > 0
+    assert after_first["q_network"]
+    assert first.agents[0].gradient_steps == steps_after_first
+
+    frozen = league.freeze_member(learner["id"], "Learner frozen")
+    assert frozen["mode"] == "snapshot"
+
+    # Replay is not saved with the member, so the second run must play enough
+    # hands to refill one batch before its first gradient step.
+    second = _materialized_trainer(tmp_path, "phase-2", learner, episodes=40)
+    # The second run starts from the member's saved network, not from scratch.
+    assert second.agents[0].gradient_steps == 0  # before load_checkpoint
+    second.load_checkpoint()
+    assert second.agents[0].gradient_steps == steps_after_first
+    assert second.agents[0].epsilon == pytest.approx(after_first["epsilon"])
+    assert second.agents[0].training is True
+    second.run()
+    after_second = league.get(learner["id"])["state"]
+    assert int(after_second["gradient_steps"]) > steps_after_first
+    assert after_second["q_network"] != after_first["q_network"]
+
+    # Freezing kept the earlier weights and the copy never trains.
+    frozen_state = league.get(frozen["id"])["state"]
+    assert frozen_state["q_network"] == after_first["q_network"]
+    assert frozen_state["gradient_steps"] == steps_after_first
+    assert league.get(frozen["id"])["mode"] == "snapshot"

@@ -34,6 +34,13 @@ SEAT_FOLDED = 3
 SEAT_ALL_IN = 4
 SEAT_BUTTON = 5
 
+# Card codes in the first 52 slots. CARD_OPPONENT only appears for a seat that
+# was given full vision ("Sees all cards" on the campaign form).
+CARD_UNSEEN = 0.0
+CARD_BOARD = 1.0
+CARD_HOLE = 2.0
+CARD_OPPONENT = 3.0
+
 ACTION_NAMES = {
     0: "fold",
     1: "check/call",
@@ -56,7 +63,9 @@ CARD_INDEX = _card_index()
 def encode_public(public: dict[str, Any]) -> list[float]:
     """Turn a ``public`` hand record into the fixed 118-number network input.
 
-    Cards use one slot each: 0 unseen, 1 on the board, 2 in the hero's hand.
+    Cards use one slot each: 0 unseen, 1 on the board, 2 in the hero's hand,
+    3 in an opponent's hand (only present for a seat that was given full
+    vision; a normal seat never sees a 3).
     Chip amounts are divided by the big blind. Seats are rotated so the acting
     player is block 0, then the next seat to act, around the table. Unused
     seats through seat block 9 stay zero, so a 2-player hand and a 10-player
@@ -68,9 +77,12 @@ def encode_public(public: dict[str, Any]) -> list[float]:
         raise ValueError(f"big_blind must be positive, got {big_blind}.")
 
     for card in public.get("board") or []:
-        vector[CARD_INDEX[str(card)]] = 1.0
+        vector[CARD_INDEX[str(card)]] = CARD_BOARD
     for card in public.get("hole_cards") or []:
-        vector[CARD_INDEX[str(card)]] = 2.0
+        vector[CARD_INDEX[str(card)]] = CARD_HOLE
+    for cards in (public.get("opponent_hole_cards") or {}).values():
+        for card in cards or []:
+            vector[CARD_INDEX[str(card)]] = CARD_OPPONENT
 
     stage = int(public.get("stage", 0))
     if 0 <= stage < STREET_SLOTS:

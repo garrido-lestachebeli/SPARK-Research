@@ -90,7 +90,10 @@ class NoLimitHoldemAdapter(RLCardPokerAdapter):
 
         Seats are stored in table order (seat 0, seat 1, ...). The DQN encoder
         rotates that list so the acting player is first. ``hole_cards`` is only
-        this player's hand.
+        this player's hand. ``full_vision`` says whether this seat was given
+        perfect information; when it is ``True`` the record also carries
+        ``opponent_hole_cards`` (seat id -> cards) for every other seat.
+        Seats without full vision never receive that key.
         """
         if self._env is None:
             raise RuntimeError("Environment must be reset before reading a decision.")
@@ -101,7 +104,7 @@ class NoLimitHoldemAdapter(RLCardPokerAdapter):
         hero_committed = committed[hero]
         to_call = max(0.0, max(committed) - hero_committed)
         button = int(game.dealer_id)
-        return {
+        public: dict[str, Any] = {
             "hole_cards": [str(card) for card in (raw.get("hand") or [])],
             "board": [str(card) for card in (raw.get("public_cards") or [])],
             "stage": int(raw.get("stage", 0)),
@@ -112,6 +115,7 @@ class NoLimitHoldemAdapter(RLCardPokerAdapter):
             "hero_seat": hero,
             "dealer_button": button,
             "num_players": len(players),
+            "full_vision": self.sees_all_cards(hero),
             "action_log": [dict(entry) for entry in self._action_log],
             "seats": [
                 {
@@ -124,3 +128,10 @@ class NoLimitHoldemAdapter(RLCardPokerAdapter):
                 for seat_id, player in enumerate(players)
             ],
         }
+        if public["full_vision"]:
+            public["opponent_hole_cards"] = {
+                str(seat_id): [card.get_index() for card in (player.hand or [])]
+                for seat_id, player in enumerate(players)
+                if seat_id != hero
+            }
+        return public

@@ -211,22 +211,41 @@ class LeagueMemberStore:
             },
         )
 
-    def copy_member(self, member_id: str, name: str) -> dict[str, Any]:
+    def copy_member(
+        self, member_id: str, name: str, *, mode: str | None = None
+    ) -> dict[str, Any]:
+        """Duplicate a member's current state under a new name.
+
+        ``mode`` defaults to the source's mode. Pass ``"snapshot"`` to freeze
+        the copy: it keeps the weights as they are right now and never trains,
+        while the source keeps learning.
+        """
         source = self.get(member_id)
+        resolved_mode = str(source.get("mode") or "") if mode is None else str(mode)
+        frozen = resolved_mode == "snapshot" and str(source.get("mode")) == "train"
+        notes = (
+            f"Frozen copy of league member {source.get('name')!r}."
+            if frozen
+            else f"Copied from league member {source.get('name')!r}."
+        )
         return self._write_member(
             name=self._name(name),
             environment=str(source["environment"]),
             agent_id=str(source["agent_id"]),
             status=self._status(str(source.get("status", "league"))),
-            mode=str(source.get("mode") or ""),
+            mode=resolved_mode,
             state=dict(source["state"]),
             source={
-                "kind": "blank",
+                "kind": "frozen" if frozen else "blank",
                 "snapshot_id": None,
-                "notes": f"Copied from league member {source.get('name')!r}.",
+                "notes": notes,
             },
             elo=DEFAULT_ELO,
         )
+
+    def freeze_member(self, member_id: str, name: str) -> dict[str, Any]:
+        """Snapshot a learner's policy as a new Snapshot-mode member."""
+        return self.copy_member(member_id, name, mode="snapshot")
 
     def set_status(self, member_id: str, status: Status) -> dict[str, Any]:
         member = self.get(member_id)

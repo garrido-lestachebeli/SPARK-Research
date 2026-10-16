@@ -12,22 +12,58 @@ from spark.storage import LeagueMemberNotFound, LeagueMemberStore, RunDatabase
 from spark.storage.import_export import export_json
 
 
+def _sqlite_signature(path: Path) -> tuple[tuple[str, int, int], ...]:
+    """Mtime and size of a database plus its WAL sidecars.
+
+    Training writes land in ``run.sqlite-wal`` until SQLite checkpoints, so the
+    main file alone stays stale while a worker is running.
+    """
+    parts = []
+    for candidate in (
+        path,
+        path.with_name(path.name + "-wal"),
+        path.with_name(path.name + "-shm"),
+    ):
+        try:
+            stat = candidate.stat()
+        except OSError:
+            parts.append((candidate.name, 0, 0))
+        else:
+            parts.append((candidate.name, stat.st_mtime_ns, stat.st_size))
+    return tuple(parts)
+
+
 class RunsService:
     def __init__(self, runs_directory: str | Path) -> None:
         self.runs_directory = Path(runs_directory).resolve()
         self.runs_directory.mkdir(parents=True, exist_ok=True)
         self.league = LeagueMemberStore(self.runs_directory)
+        self._run_cache: dict[str, tuple[tuple[tuple[str, int, int], ...], dict[str, Any] | None]] = {}
+        self._statistics_cache: dict[str, tuple[tuple[tuple[str, int, int], ...], dict[str, Any]]] = {}
 
     def list_runs(self) -> list[dict[str, Any]]:
         runs = []
+        seen: set[str] = set()
         for path in self.runs_directory.glob("*/run.sqlite"):
-            try:
-                run = RunDatabase(path, initialize=False).get_run()
-            except Exception:
-                continue
-            if run:
-                run["database_path"] = str(path)
-                runs.append(run)
+            key = str(path)
+            seen.add(key)
+            signature = _sqlite_signature(path)
+            cached = self._run_cache.get(key)
+            if cached is not None and cached[0] == signature:
+                run = cached[1]
+            else:
+                try:
+                    run = RunDatabase(path, initialize=False).get_run()
+                except Exception:
+                    run = None
+                if run is not None:
+                    run = dict(run)
+                    run["database_path"] = str(path)
+                self._run_cache[key] = (signature, run)
+            if run is not None:
+                runs.append(dict(run))
+        for key in [key for key in self._run_cache if key not in seen]:
+            del self._run_cache[key]
         return sorted(runs, key=lambda item: item["updated_at"], reverse=True)
 
     def database(self, run_id: str) -> RunDatabase:
@@ -40,7 +76,15 @@ class RunsService:
         return RunDatabase(path, initialize=True)
 
     def statistics(self, run_id: str) -> dict[str, Any]:
-        database = self.database(run_id)
+        self._validate_run_id(run_id)
+        path = self.runs_directory / run_id / "run.sqlite"
+        if not path.exists():
+            raise FileNotFoundError(run_id)
+        signature = _sqlite_signature(path)
+        cached = self._statistics_cache.get(run_id)
+        if cached is not None and cached[0] == signature:
+            return cached[1]
+        database = RunDatabase(path, initialize=True)
         stats = database.statistics()
         stats["evaluation"] = database.evaluation_summary()
         seats = self._seat_lineup(run_id, database)
@@ -49,6 +93,7 @@ class RunsService:
         stats["focus_seat"] = str(focus_seat)
         if seats and 0 <= focus_seat < len(seats):
             stats["focus_seat_label"] = seats[focus_seat]["label"]
+        self._statistics_cache[run_id] = (_sqlite_signature(path), stats)
         return stats
 
     def list_episodes(
@@ -105,6 +150,8 @@ class RunsService:
                 f"Could not delete run {run_id}: {error}. "
                 "Stop the worker and try again."
             ) from error
+        self._run_cache.pop(str(directory / "run.sqlite"), None)
+        self._statistics_cache.pop(run_id, None)
         return freed
 
     def _seat_lineup(self, run_id: str, database: RunDatabase) -> list[dict[str, Any]]:
@@ -126,6 +173,9 @@ class RunsService:
                 detail_parts.append("league")
             elif source == "league_random":
                 detail_parts.append("league random")
+            full_vision = bool(config.get("full_vision", False))
+            if full_vision:
+                detail_parts.append("sees all cards")
             lineup.append(
                 {
                     "seat": seat,
@@ -136,6 +186,7 @@ class RunsService:
                     "mode": mode,
                     "source": source,
                     "league_member_id": member_id,
+                    "full_vision": full_vision,
                     "label": f"{display_name} (seat {seat})",
                     "short_label": display_name,
                     "detail": " · ".join(detail_parts),
@@ -155,6 +206,7 @@ class RunsService:
                 "mode": "unknown",
                 "source": "fresh",
                 "league_member_id": None,
+                "full_vision": False,
                 "label": f"{fallback_name} (seat 0)",
                 "short_label": fallback_name,
                 "detail": "primary",

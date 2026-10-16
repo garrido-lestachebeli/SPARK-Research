@@ -41,6 +41,9 @@ def test_dashboard_serves_statistics_without_episode_replay_logs(tmp_path, monke
     assert 'name="small_blind"' in page.text
     assert 'name="big_blind"' in page.text
     assert 'name="episode_mode"' in page.text
+    assert 'name="observation_mode"' not in page.text
+    script = client.get("/static/app.js")
+    assert 'class="seat-full-vision"' in script.text
     assert 'name="league_reroll_interval"' in page.text
     assert 'data-preset="learner-vs-league"' in page.text
     config = client.get("/api/config")
@@ -295,3 +298,17 @@ def test_league_api_endpoints(tmp_path, monkeypatch):
     deleted = client.delete(f"/api/league/members/{member_id}")
     assert deleted.status_code == 200
     assert client.get(f"/api/league/members/{member_id}").status_code == 404
+
+
+def test_invalid_run_id_returns_400(tmp_path, monkeypatch):
+    monkeypatch.setattr(web_app, "runs", RunsService(tmp_path))
+    client = TestClient(web_app.app)
+    for path in (
+        "/api/runs/bad.id/statistics",
+        "/api/runs/bad.id/episodes",
+        "/api/runs/bad.id/episodes/1",
+        "/api/runs/bad.id/export",
+    ):
+        response = client.get(path)
+        assert response.status_code == 400
+        assert response.json()["detail"] == "Invalid run ID."

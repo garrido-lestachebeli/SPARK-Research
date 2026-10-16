@@ -188,6 +188,9 @@ class CampaignService:
         source = str(seat_value.get("source") or "fresh").lower()
         if source not in {"fresh", "league_member", "league_random"}:
             raise ValueError(f"Seat {seat} has invalid source {source!r}.")
+        # Per-seat perfect information: this seat is shown every opponent's
+        # hole cards while the rest of the table plays normal poker.
+        full_vision = bool(seat_value.get("full_vision", False))
 
         if source == "fresh":
             agent_id = str(seat_value.get("agent_id", "")).strip()
@@ -215,6 +218,7 @@ class CampaignService:
                 "mode": mode,
                 "snapshot_id": snapshot_id,
                 "league_member_id": None,
+                "full_vision": full_vision,
             }
 
         if source == "league_member":
@@ -232,6 +236,7 @@ class CampaignService:
                 "mode": _league_mode_to_seat_mode(str(member.get("mode") or "snapshot")),
                 "snapshot_id": None,
                 "league_member_id": member_id,
+                "full_vision": full_vision,
             }
 
         # league_random — resolve once for a reproducible starting lineup.
@@ -248,15 +253,25 @@ class CampaignService:
             "mode": _league_mode_to_seat_mode(str(member.get("mode") or "snapshot")),
             "snapshot_id": None,
             "league_member_id": str(member["id"]),
+            "full_vision": full_vision,
         }
 
     def refresh(self) -> list[dict[str, Any]]:
         campaigns = self.store.list_campaigns()
+        numeric_ids = [
+            str(job["scheduler_id"])
+            for campaign in campaigns
+            for job in campaign["jobs"]
+            if str(job.get("scheduler_id") or "").isdigit()
+        ]
+        statuses: dict[str, dict[str, str]] = {}
+        if numeric_ids and self.slurm.available:
+            statuses = self.slurm.statuses(numeric_ids)
         for campaign in campaigns:
             for job in campaign["jobs"]:
-                scheduler_id = job.get("scheduler_id")
-                if scheduler_id and scheduler_id.isdigit() and self.slurm.available:
-                    status = self.slurm.status(scheduler_id)["state"]
+                scheduler_id = str(job.get("scheduler_id") or "")
+                if scheduler_id in statuses:
+                    status = statuses[scheduler_id]["state"]
                     self.store.update_job(job["run_id"], status)
                     job["status"] = status
                 try:
@@ -401,10 +416,12 @@ class CampaignService:
         if self.slurm.available:
             scheduler_id = self.slurm.submit_training(config)
             self.store.update_job(run_id, "RESUBMITTED", scheduler_id)
+            self._mark_run_resumed(run_id)
             return scheduler_id
         if self.local_jobs:
             scheduler_id = self._start_local(config)
             self.store.update_job(run_id, "LOCAL", scheduler_id)
+            self._mark_run_resumed(run_id)
             return scheduler_id
         raise RuntimeError("Slurm/local job execution is unavailable on this host.")
 
@@ -415,7 +432,25 @@ class CampaignService:
         )
         if not campaign:
             raise FileNotFoundError(campaign_id)
-        return [self.resume(job["run_id"]) for job in campaign["jobs"]]
+        resumed: list[str] = []
+        live_scheduler = {
+            "PENDING",
+            "RUNNING",
+            "CONFIGURING",
+            "COMPLETING",
+            "SUSPENDED",
+            "REQUEUED",
+        }
+        for job in campaign["jobs"]:
+            # Completed runs stay put. Sticky labels such as SUBMITTED, LOCAL,
+            # and STOP_REQUESTED outlive the worker, so they do not block a
+            # stopped or failed run. A live Slurm state still does.
+            if self._run_status(job) not in {"stopped", "failed"}:
+                continue
+            if str(job.get("status", "")).upper() in live_scheduler:
+                continue
+            resumed.append(self.resume(job["run_id"]))
+        return resumed
 
     def logs(self, run_id: str, *, max_bytes: int = 65_536) -> str:
         job = self.store.get_job(run_id)
@@ -485,13 +520,34 @@ class CampaignService:
         log_path = self.runs.runs_directory / config["run_id"] / "worker.log"
         log_path.parent.mkdir(parents=True, exist_ok=True)
         log = log_path.open("a", encoding="utf-8")
-        process = subprocess.Popen(
-            command,
-            cwd=self.project_root,
-            stdout=log,
-            stderr=subprocess.STDOUT,
-        )
+        try:
+            process = subprocess.Popen(
+                command,
+                cwd=self.project_root,
+                stdout=log,
+                stderr=subprocess.STDOUT,
+            )
+        finally:
+            # The child keeps its own copy of the handle. Closing here stops
+            # the dashboard from leaking one file per local worker.
+            log.close()
         return f"local-{process.pid}"
+
+    def _mark_run_resumed(self, run_id: str) -> None:
+        """Mark a resubmitted run running so Resume all cannot queue it twice."""
+        try:
+            self.runs.database(run_id).update_run(status="running")
+        except (FileNotFoundError, sqlite3.Error, OSError, ValueError):
+            return
+
+    def _run_status(self, job: dict[str, Any]) -> str:
+        try:
+            run = self.runs.database(str(job["run_id"])).get_run()
+        except (FileNotFoundError, sqlite3.Error, OSError, ValueError):
+            return ""
+        if not run:
+            return ""
+        return str(run.get("status", "")).lower()
 
     def _job_is_active(self, job: dict[str, Any]) -> bool:
         status = str(job.get("status", "")).upper()
@@ -509,8 +565,4 @@ class CampaignService:
         }
         if status in active:
             return True
-        try:
-            run = self.runs.database(str(job["run_id"])).get_run()
-        except (FileNotFoundError, sqlite3.Error, OSError):
-            return False
-        return bool(run and str(run.get("status", "")).lower() == "running")
+        return self._run_status(job) == "running"

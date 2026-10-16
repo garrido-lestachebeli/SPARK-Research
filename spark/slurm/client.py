@@ -116,42 +116,60 @@ class SlurmClient:
         return match.group("id")
 
     def status(self, job_id: str) -> dict[str, str]:
-        job_id = self._job_id(job_id)
+        resolved = self._job_id(job_id)
+        return self.statuses([resolved])[resolved]
+
+    def statuses(self, job_ids: list[str]) -> dict[str, dict[str, str]]:
+        ids = [self._job_id(str(job_id)) for job_id in job_ids]
+        if not ids:
+            return {}
         self._require("squeue")
         output = self._run(
-            ["squeue", "--noheader", "--jobs", job_id, "--format=%i|%T|%M|%N"],
+            ["squeue", "--noheader", "--jobs", ",".join(ids), "--format=%i|%T|%M|%N"],
             check=False,
         ).strip()
-        if output:
-            identifier, state, elapsed, node = (output.split("|", 3) + [""])[:4]
-            return {
+        found: dict[str, dict[str, str]] = {}
+        for line in output.splitlines():
+            if not line.strip():
+                continue
+            identifier, state, elapsed, node = (line.split("|", 3) + ["", "", "", ""])[:4]
+            if identifier in found:
+                continue
+            found[identifier] = {
                 "job_id": identifier,
                 "state": state,
                 "elapsed": elapsed,
                 "node": node,
             }
-        if shutil.which("sacct"):
+        missing = [job_id for job_id in ids if job_id not in found]
+        if missing and shutil.which("sacct"):
             accounting = self._run(
                 [
                     "sacct",
                     "--noheader",
                     "--parsable2",
                     "--jobs",
-                    job_id,
+                    ",".join(missing),
                     "--format=JobIDRaw,State,Elapsed,NodeList",
                 ],
                 check=False,
             )
             for line in accounting.splitlines():
                 values = line.strip().split("|")
-                if values and values[0] == job_id:
-                    return {
-                        "job_id": job_id,
-                        "state": values[1],
-                        "elapsed": values[2],
-                        "node": values[3],
-                    }
-        return {"job_id": job_id, "state": "UNKNOWN", "elapsed": "", "node": ""}
+                if len(values) < 4 or values[0] not in missing or values[0] in found:
+                    continue
+                found[values[0]] = {
+                    "job_id": values[0],
+                    "state": values[1],
+                    "elapsed": values[2],
+                    "node": values[3],
+                }
+        for job_id in ids:
+            found.setdefault(
+                job_id,
+                {"job_id": job_id, "state": "UNKNOWN", "elapsed": "", "node": ""},
+            )
+        return found
 
     def cancel(self, job_id: str) -> None:
         self._require("scancel")

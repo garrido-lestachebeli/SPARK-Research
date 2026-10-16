@@ -19,6 +19,9 @@ class FakeSlurm:
     def status(self, job_id):
         return {"job_id": job_id, "state": "RUNNING", "elapsed": "00:01", "node": "node1"}
 
+    def statuses(self, job_ids):
+        return {str(job_id): self.status(str(job_id)) for job_id in job_ids}
+
     def cancel(self, job_id):
         self.cancelled.append(job_id)
 
@@ -216,6 +219,7 @@ def test_campaign_materializes_selected_agent_snapshot(tmp_path):
                             "agent_id": "leduc-random",
                             "mode": "train",
                             "snapshot_id": snapshot["id"],
+                            "full_vision": True,
                         },
                         {
                             "source": "fresh",
@@ -236,6 +240,14 @@ def test_campaign_materializes_selected_agent_snapshot(tmp_path):
     assert fake.submitted[0]["seat_configs"][0]["snapshot_id"] == snapshot["id"]
     assert fake.submitted[0]["seat_configs"][1]["mode"] == "evaluate"
     assert fake.submitted[0]["eval_interval"] == 5
+    # Per-seat vision travels with the seat, not the table.
+    assert fake.submitted[0]["seat_configs"][0]["full_vision"] is True
+    assert fake.submitted[0]["seat_configs"][1]["full_vision"] is False
+    import json
+
+    saved = json.loads(checkpoint.read_text(encoding="utf-8"))
+    assert [seat["full_vision"] for seat in saved["seat_configs"]] == [True, False]
+    assert "observation_mode" not in saved["config"]
 
 
 def test_campaign_resolves_league_random_and_rejects_empty_pool(tmp_path):
@@ -291,3 +303,48 @@ def test_campaign_resolves_league_random_and_rejects_empty_pool(tmp_path):
     assert seat["agent_id"] == "leduc-cfr"
     assert fake.submitted[0]["league_reroll_interval"] == 10
     assert result["jobs"][0]["seats"][1]["league_member_id"] == member["id"]
+
+
+def test_resume_campaign_skips_completed_and_live_jobs(tmp_path):
+    store = DashboardStore(tmp_path / "dashboard.sqlite")
+    runs = RunsService(tmp_path / "runs")
+    service = CampaignService(tmp_path, runs, store)
+    fake = FakeSlurm()
+    service.slurm = fake
+    result = service.create(
+        {
+            "name": "resume-filter",
+            "environments": ["leduc-holdem", "limit-holdem"],
+            "seed": 1,
+        }
+    )
+    jobs = result["jobs"]
+    for job in jobs:
+        Trainer(
+            TrainerConfig(
+                run_id=job["run_id"],
+                environment=job["environment"],
+                run_directory=str(runs.runs_directory),
+                episode_limit=1,
+            )
+        ).run()
+        store.update_job(job["run_id"], "COMPLETED")
+
+    assert service.resume_campaign(result["campaign_id"]) == []
+
+    runs.database(jobs[0]["run_id"]).update_run(status="stopped")
+    store.update_job(jobs[0]["run_id"], "RUNNING")
+    assert service.resume_campaign(result["campaign_id"]) == []
+
+    store.update_job(jobs[0]["run_id"], "CANCELLED")
+    resumed = service.resume_campaign(result["campaign_id"])
+    assert len(resumed) == 1
+    assert fake.submitted[-1]["run_id"] == jobs[0]["run_id"]
+    assert runs.database(jobs[0]["run_id"]).get_run()["status"] == "running"
+    assert service.resume_campaign(result["campaign_id"]) == []
+
+    runs.database(jobs[1]["run_id"]).update_run(status="failed")
+    store.update_job(jobs[1]["run_id"], "FAILED")
+    resumed = service.resume_campaign(result["campaign_id"])
+    assert len(resumed) == 1
+    assert fake.submitted[-1]["run_id"] == jobs[1]["run_id"]
