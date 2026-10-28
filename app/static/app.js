@@ -9,6 +9,7 @@
   runs: [],
   selectedRun: null,
   selectedOverviewSeat: null,
+  selectedOverviewMetric: "recent",
   selectedEvalOpponent: null,
   overviewStats: null,
   activeTab: "overview",
@@ -75,6 +76,9 @@ function setTab(name) {
   // Refresh league data on entry so it is current without periodic clobbering.
   if (name === "league") {
     loadLeagueMembers();
+  }
+  if (name === "overview" && state.overviewStats) {
+    renderOverviewStats();
   }
 }
 
@@ -231,43 +235,75 @@ function renderOverviewStats() {
   const seatStats = stats.seat_payoffs?.[focusSeat] || {};
   const recent = stats.recent_seat_payoffs?.[focusSeat] || {};
   const winRate = stats.seat_outcomes?.[focusSeat]?.win_rate || {};
+  const metric = overviewMetric();
+  const windowSize = stats.rolling_window || 100;
+  const evalRounds = stats.evaluation?.seats?.[focusSeat]?.rounds?.length || 0;
   renderSeatLineup(stats.seats || [], focusSeat);
-  $("#payoff-chart-title").textContent =
-    `${focus.short_label} payoff over training`;
   $("#stat-cards").innerHTML = [
-    [
-      "Recent payoff",
-      formatSigned(recent.mean),
-      `${focus.label} · ${formatCi(recent.ci_low, recent.ci_high)}`,
-      "primary",
-    ],
-    [
-      "Overall payoff",
-      formatSigned(seatStats.mean),
-      `${focus.label} · ${formatCi(seatStats.ci_low, seatStats.ci_high)}`,
-    ],
-    [
-      "Win rate",
-      formatPercent(winRate.rate),
-      `${focus.label} · ${formatCi(winRate.ci_low, winRate.ci_high, true)}`,
-    ],
-    ["Episodes", formatNumber(stats.episodes), `agent version ${stats.latest_agent_version}`],
-    ["Training pace", `${formatNumber(stats.episodes_per_second, 1)} ep/s`, `${formatNumber(stats.total_duration, 1)}s observed`],
-  ].map(([label, value, detail, className = ""]) => `
-    <article class="stat ${className}">
-      <span>${label}</span>
-      <strong>${value}</strong>
-      <small>${detail || ""}</small>
-    </article>
-  `).join("");
-  $("#trend-window").textContent =
-    `Rolling mean of ${stats.rolling_window || 100} (full window only) · viewing ${focus.short_label}`;
-  drawPayoffChart(stats.rolling || [], focusSeat);
-  renderEvaluation(stats.evaluation, focusSeat, focus);
+    statButton("recent", "Recent payoff", formatSigned(recent.mean), `${focus.label} · ${formatCi(recent.ci_low, recent.ci_high)}`, metric),
+    statButton("overall", "Overall payoff", formatSigned(seatStats.mean), `${focus.label} · ${formatCi(seatStats.ci_low, seatStats.ci_high)}`, metric),
+    statButton("win_rate", "Win rate", formatPercent(winRate.rate), `${focus.label} · ${formatCi(winRate.ci_low, winRate.ci_high, true)}`, metric),
+    statButton(null, "Episodes", formatNumber(stats.episodes), `agent version ${stats.latest_agent_version}`),
+    statButton("pace", "Training pace", `${formatNumber(stats.episodes_per_second, 1)} ep/s`, `${formatNumber(stats.total_duration, 1)}s observed`, metric),
+    statButton("evaluation", "Evaluation rounds", formatNumber(evalRounds), evalRounds ? "Test payoff by round" : "No test rounds yet", metric),
+  ].join("");
+  $("#stat-cards").querySelectorAll("[data-metric]").forEach((button) => {
+    button.addEventListener("click", () => selectOverviewMetric(button.dataset.metric));
+  });
+  if (metric === "evaluation") {
+    renderEvaluation(stats.evaluation, focusSeat, focus);
+  } else {
+    const spec = OVERVIEW_METRICS[metric];
+    $("#payoff-chart-title").textContent = `${focus.short_label} ${spec.label.toLowerCase()}`;
+    $("#trend-window").textContent = metric === "overall"
+      ? `Cumulative mean · viewing ${focus.short_label}`
+      : `Rolling mean of ${windowSize} hands · viewing ${focus.short_label}`;
+    const legend = $("#chart-legend");
+    if (legend) {
+      const line = metric === "overall" ? "cumulative" : "rolling";
+      legend.innerHTML = `<span><i class="legend-line ${line}"></i>${spec.legend}${metric === "overall" ? "" : ` of ${windowSize} hands`}</span>`;
+    }
+    const lineup = $("#eval-opponent-lineup");
+    if (lineup) lineup.classList.add("hidden");
+    const empty = $("#eval-empty");
+    if (empty) {
+      empty.textContent = "";
+      empty.classList.add("hidden");
+    }
+    drawTrainingChart(stats.rolling || [], focusSeat, metric);
+  }
   renderPayoffSummary(stats, focusSeat);
   renderActions(stats.actions || [], stats, focusSeat);
   renderOutcomes(stats.seat_outcomes || stats.outcomes || {}, stats, focusSeat);
   renderEpisodeDiagnostics(stats, focusSeat);
+}
+
+const OVERVIEW_METRICS = {
+  recent: { label: "Recent payoff", series: "average", unit: "chips", color: "#55d6be", legend: "Rolling mean" },
+  overall: { label: "Overall payoff", series: "cumulative", unit: "chips", color: "#67a8ff", legend: "Cumulative mean" },
+  win_rate: { label: "Win rate", series: "win_rate", unit: "percent", color: "#55d6be", legend: "Rolling mean" },
+  pace: { label: "Training pace", series: "episodes_per_second", unit: "pace", color: "#55d6be", legend: "Rolling mean" },
+};
+
+function overviewMetric() {
+  const metric = state.selectedOverviewMetric;
+  if (metric === "evaluation" || OVERVIEW_METRICS[metric]) return metric;
+  return "recent";
+}
+
+function selectOverviewMetric(metric) {
+  state.selectedOverviewMetric = metric === "evaluation" || OVERVIEW_METRICS[metric] ? metric : "recent";
+  renderOverviewStats();
+}
+
+function statButton(id, label, value, detail, selected) {
+  if (!id) {
+    return `<article class="stat"><span>${label}</span><strong>${value}</strong><small>${detail || ""}</small></article>`;
+  }
+  const pressed = id === selected;
+  return `<button type="button" class="stat${pressed ? " selected" : ""}" data-metric="${id}" aria-pressed="${pressed ? "true" : "false"}">
+    <span>${label}</span><strong>${value}</strong><small>${detail || ""}</small>
+  </button>`;
 }
 
 function seatInfo(stats, seat) {
@@ -353,10 +389,23 @@ function renderEmptyStats() {
   const lineup = $("#seat-lineup");
   if (lineup) lineup.innerHTML = "";
   const evalLineup = $("#eval-opponent-lineup");
-  if (evalLineup) evalLineup.innerHTML = "";
+  if (evalLineup) {
+    evalLineup.innerHTML = "";
+    evalLineup.classList.add("hidden");
+  }
   const title = $("#payoff-chart-title");
   if (title) title.textContent = "Payoff over training";
-  renderEvaluation(null, "0");
+  const trend = $("#trend-window");
+  if (trend) trend.textContent = "";
+  const empty = $("#eval-empty");
+  if (empty) {
+    empty.textContent = "";
+    empty.classList.add("hidden");
+  }
+  const legend = $("#chart-legend");
+  if (legend) legend.innerHTML = "";
+  const surface = fitOverviewCanvas(false);
+  if (surface) surface.context.clearRect(0, 0, surface.width, surface.height);
   $("#payoff-summary").innerHTML = "";
   $("#episode-diagnostics").innerHTML = "";
   $("#action-bars").innerHTML = "";
@@ -370,70 +419,167 @@ function rollingValuesForSeat(point, seat) {
     return {
       average: nested.average_payoff,
       cumulative: nested.cumulative_average ?? nested.average_payoff,
+      win_rate: nested.win_rate,
+      episodes_per_second: nested.episodes_per_second,
     };
   }
   if (key === "0") {
     return {
       average: point.seat_0_average_payoff,
       cumulative: point.seat_0_cumulative_average ?? point.seat_0_average_payoff,
+      win_rate: point.seat_0_win_rate,
+      episodes_per_second: point.seat_0_episodes_per_second,
     };
   }
-  return { average: 0, cumulative: 0 };
+  return { average: 0, cumulative: 0, win_rate: 0, episodes_per_second: 0 };
 }
 
-function drawPayoffChart(points, seat = "0") {
+let fittedChartKey = "";
+
+function fitOverviewCanvas(evaluation) {
   const canvas = $("#payoff-chart");
-  const context = canvas.getContext("2d");
-  const width = canvas.width;
-  const height = canvas.height;
-  context.clearRect(0, 0, width, height);
-  context.strokeStyle = "#203954";
-  context.lineWidth = 1;
-  for (let index = 1; index < 5; index += 1) {
-    const y = (height / 5) * index;
-    context.beginPath(); context.moveTo(0, y); context.lineTo(width, y); context.stroke();
+  if (!canvas) return null;
+  canvas.classList.toggle("chart-eval", Boolean(evaluation));
+  const width = canvas.clientWidth;
+  const height = canvas.clientHeight;
+  if (width < 2 || height < 2) return null;
+  const dpr = window.devicePixelRatio || 1;
+  const bitmapWidth = Math.max(1, Math.round(width * dpr));
+  const bitmapHeight = Math.max(1, Math.round(height * dpr));
+  fittedChartKey = `${bitmapWidth}x${bitmapHeight}`;
+  if (canvas.width !== bitmapWidth || canvas.height !== bitmapHeight) {
+    canvas.width = bitmapWidth;
+    canvas.height = bitmapHeight;
   }
-  if (!points.length) return;
-  // Skip partial rolling windows (episodes 1..W-1). Those are means of 1, 2, …
-  // games, not a true W-game average, and they dominate the Y-axis as a fake spike.
-  const windowSize = Number(state.overviewStats?.rolling_window || 100);
-  const warmup = Math.min(Math.max(windowSize - 1, 0), Math.max(points.length - 1, 0));
-  const usable = points.slice(warmup);
-  if (!usable.length) return;
-  const series = usable.map((point) => rollingValuesForSeat(point, seat));
-  const values = series
-    .flatMap((point) => [point.average, point.cumulative])
-    .filter((value) => Number.isFinite(value));
-  if (!values.length) return;
-  const minimum = Math.min(...values, -1);
-  const maximum = Math.max(...values, 1);
-  const span = maximum - minimum || 1;
-  const yAt = (value) => height - ((value - minimum) / span) * height;
-  const xAt = (index) => (series.length === 1 ? width / 2 : index / (series.length - 1) * width);
+  const context = canvas.getContext("2d");
+  context.setTransform(dpr, 0, 0, dpr, 0, 0);
+  return { canvas, context, width, height };
+}
 
-  context.strokeStyle = "#67a8ff";
-  context.lineWidth = 2;
-  context.beginPath();
-  series.forEach((point, index) => {
-    if (!Number.isFinite(point.cumulative)) return;
-    const y = yAt(point.cumulative);
-    if (index === 0) context.moveTo(xAt(index), y); else context.lineTo(xAt(index), y);
+function watchOverviewChart() {
+  const canvas = $("#payoff-chart");
+  if (!canvas || canvas.dataset.resizeWatch || typeof ResizeObserver === "undefined") return;
+  canvas.dataset.resizeWatch = "1";
+  let queued = false;
+  const observer = new ResizeObserver(() => {
+    const width = canvas.clientWidth;
+    const height = canvas.clientHeight;
+    if (width < 2 || height < 2 || !state.overviewStats) return;
+    const dpr = window.devicePixelRatio || 1;
+    const key = `${Math.round(width * dpr)}x${Math.round(height * dpr)}`;
+    if (key === fittedChartKey || queued) return;
+    queued = true;
+    requestAnimationFrame(() => {
+      queued = false;
+      if (state.overviewStats) renderOverviewStats();
+    });
   });
-  context.stroke();
+  observer.observe(canvas);
+}
 
-  context.strokeStyle = "#55d6be";
-  context.lineWidth = 3;
-  context.beginPath();
-  let started = false;
-  series.forEach((point, index) => {
-    if (!Number.isFinite(point.average)) return;
-    const y = yAt(point.average);
-    if (!started) {
-      context.moveTo(xAt(index), y);
-      started = true;
-    } else {
-      context.lineTo(xAt(index), y);
+function formatAxisTick(value, unit) {
+  if (!Number.isFinite(value)) return "";
+  if (unit === "percent") return `${Math.round(value * 100)}%`;
+  if (unit === "pace") {
+    const text = value >= 10 ? value.toFixed(1) : value.toFixed(2);
+    return `${text}/s`;
+  }
+  const digits = Math.abs(value) >= 100 ? 0 : 1;
+  return formatSigned(value, digits);
+}
+
+function drawTrainingChart(points, seat = "0", metric = "recent") {
+  const surface = fitOverviewCanvas(false);
+  if (!surface) return;
+  const { context, width, height } = surface;
+  context.clearRect(0, 0, width, height);
+  const spec = OVERVIEW_METRICS[metric] || OVERVIEW_METRICS.recent;
+  const padding = { top: 16, right: 16, bottom: 42, left: 64 };
+  const plotWidth = width - padding.left - padding.right;
+  const plotHeight = height - padding.top - padding.bottom;
+  const windowSize = Number(state.overviewStats?.rolling_window || 100);
+  const usable = points.filter((point) => Number(point.episode) >= windowSize);
+  const series = usable.map((point) => ({
+    episode: Number(point.episode),
+    value: rollingValuesForSeat(point, seat)[spec.series],
+  })).filter((point) => Number.isFinite(point.value));
+
+  let minimum = 0;
+  let maximum = spec.unit === "percent" ? 1 : 1;
+  if (series.length) {
+    minimum = Math.min(...series.map((point) => point.value));
+    maximum = Math.max(...series.map((point) => point.value));
+  }
+  if (spec.unit === "percent") {
+    minimum = 0;
+    maximum = 1;
+  } else if (spec.unit === "chips") {
+    minimum = Math.min(minimum, 0);
+    maximum = Math.max(maximum, 0);
+  } else {
+    minimum = Math.min(minimum, 0);
+  }
+  if (maximum === minimum) {
+    maximum += 1;
+    minimum -= spec.unit === "pace" ? 0 : 1;
+    if (spec.unit === "percent") {
+      minimum = 0;
+      maximum = 1;
     }
+  }
+  const span = maximum - minimum || 1;
+  const yAt = (value) => padding.top + plotHeight - ((value - minimum) / span) * plotHeight;
+  const xAt = (index) => (
+    series.length <= 1
+      ? padding.left + plotWidth / 2
+      : padding.left + (index / (series.length - 1)) * plotWidth
+  );
+
+  context.font = "12px Inter, system-ui, sans-serif";
+  context.textBaseline = "middle";
+  context.textAlign = "right";
+  context.lineWidth = 1;
+  for (let index = 0; index <= 4; index += 1) {
+    const value = minimum + (span / 4) * index;
+    const y = yAt(value);
+    context.strokeStyle = "#203954";
+    context.beginPath();
+    context.moveTo(padding.left, y);
+    context.lineTo(width - padding.right, y);
+    context.stroke();
+    context.fillStyle = "#8fa6ba";
+    context.fillText(formatAxisTick(value, spec.unit), padding.left - 8, y);
+  }
+
+  if (spec.unit === "chips" && minimum < 0 && maximum > 0) {
+    context.strokeStyle = "#8fa6ba";
+    context.setLineDash([4, 4]);
+    context.beginPath();
+    context.moveTo(padding.left, yAt(0));
+    context.lineTo(width - padding.right, yAt(0));
+    context.stroke();
+    context.setLineDash([]);
+  }
+
+  context.fillStyle = "#8fa6ba";
+  context.textAlign = "center";
+  context.textBaseline = "top";
+  const tickCount = Math.min(5, Math.max(series.length, 1));
+  for (let index = 0; index < tickCount; index += 1) {
+    const seriesIndex = tickCount === 1 ? 0 : Math.round((index / (tickCount - 1)) * (series.length - 1));
+    const point = series[seriesIndex];
+    if (!point) continue;
+    context.fillText(String(point.episode), xAt(seriesIndex), height - padding.bottom + 10);
+  }
+
+  if (!series.length) return;
+  context.strokeStyle = spec.color;
+  context.lineWidth = 2.5;
+  context.beginPath();
+  series.forEach((point, index) => {
+    const y = yAt(point.value);
+    if (index === 0) context.moveTo(xAt(index), y);
+    else context.lineTo(xAt(index), y);
   });
   context.stroke();
 }
@@ -468,13 +614,13 @@ function selectEvalOpponent(opponentId) {
 }
 
 function renderEvaluation(evaluation, focusSeat = "0", focus = null) {
-  const canvas = $("#eval-chart");
+  const canvas = $("#payoff-chart");
   if (!canvas) return;
   const seatData = evaluation?.seats?.[String(focusSeat)];
   const rounds = seatData?.rounds || [];
   const opponents = seatData?.opponents || [];
   const name = focus?.short_label || `Seat ${focusSeat}`;
-  const title = $("#eval-chart-title");
+  const title = $("#payoff-chart-title");
   if (title) title.textContent = `${name} test payoff by evaluation round`;
 
   const availableIds = new Set(opponents.map((opponent) => String(opponent.opponent_member_id)));
@@ -487,7 +633,7 @@ function renderEvaluation(evaluation, focusSeat = "0", focus = null) {
   );
   const selected = selectedIndex >= 0 ? opponents[selectedIndex] : null;
 
-  const subtitle = $("#eval-window");
+  const subtitle = $("#trend-window");
   if (subtitle) {
     subtitle.textContent = selected
       ? `vs ${selected.name}`
@@ -495,6 +641,7 @@ function renderEvaluation(evaluation, focusSeat = "0", focus = null) {
   }
   const empty = $("#eval-empty");
   if (empty) {
+    empty.classList.remove("hidden");
     const testedSeats = Object.keys(evaluation?.seats || {});
     if (rounds.length && opponents.length) {
       empty.textContent = "";
@@ -503,6 +650,13 @@ function renderEvaluation(evaluation, focusSeat = "0", focus = null) {
     } else {
       empty.textContent = "No evaluation episodes yet. Set an evaluation interval (k) on the campaign form to test the frozen agent against every League member.";
     }
+    empty.classList.toggle("hidden", empty.textContent === "");
+  }
+  const lineup = $("#eval-opponent-lineup");
+  if (lineup) lineup.classList.remove("hidden");
+  const legend = $("#chart-legend");
+  if (legend) {
+    legend.innerHTML = "<span>Each column is one evaluation round. The box is the middle half of the test hands, the line is the median, and the diamond is the mean.</span>";
   }
   renderEvalOpponentLineup(opponents, selectedId);
   drawSelectedEvaluationChart(rounds, opponents, selected, selectedIndex);
@@ -567,17 +721,16 @@ function opponentEvalScale(rounds, opponentId) {
 }
 
 function drawSelectedEvaluationChart(rounds, opponents, selected, selectedIndex) {
-  const canvas = $("#eval-chart");
-  if (!canvas) return;
-  const context = canvas.getContext("2d");
-  context.clearRect(0, 0, canvas.width, canvas.height);
+  const surface = fitOverviewCanvas(true);
+  if (!surface) return;
+  surface.context.clearRect(0, 0, surface.width, surface.height);
   if (!rounds.length || !selected) return;
 
   const scale = opponentEvalScale(rounds, selected.opponent_member_id);
   if (!scale) return;
   const style = evalStyle(selectedIndex >= 0 ? selectedIndex : 0);
   drawOpponentEvaluationChart(
-    canvas,
+    surface,
     rounds,
     selected.opponent_member_id,
     style,
@@ -585,11 +738,9 @@ function drawSelectedEvaluationChart(rounds, opponents, selected, selectedIndex)
   );
 }
 
-function drawOpponentEvaluationChart(canvas, rounds, opponentId, style, scale) {
-  if (!canvas) return;
-  const context = canvas.getContext("2d");
-  const width = canvas.width;
-  const height = canvas.height;
+function drawOpponentEvaluationChart(surface, rounds, opponentId, style, scale) {
+  if (!surface) return;
+  const { context, width, height } = surface;
   context.clearRect(0, 0, width, height);
 
   const padding = { top: 16, right: 16, bottom: 40, left: 52 };
@@ -1647,6 +1798,7 @@ $("#league-seed-builtins")?.addEventListener("click", seedLeagueBuiltins);
 $("#league-create-form")?.addEventListener("submit", createLeagueMember);
 $("#league-import-form")?.addEventListener("submit", importLeagueMember);
 
+watchOverviewChart();
 initialize();
 setInterval(() => {
   if (state.pollInFlight) return;

@@ -35,7 +35,8 @@ def test_dashboard_serves_statistics_without_episode_replay_logs(tmp_path, monke
     assert 'id="league-create-form"' in page.text
     assert 'name="eval_interval"' in page.text
     assert 'name="eval_episodes"' in page.text
-    assert 'id="eval-chart"' in page.text
+    assert 'id="payoff-chart"' in page.text
+    assert 'id="eval-chart"' not in page.text
     assert 'id="eval-opponent-lineup"' in page.text
     assert 'name="starting_stack"' in page.text
     assert 'name="small_blind"' in page.text
@@ -45,6 +46,7 @@ def test_dashboard_serves_statistics_without_episode_replay_logs(tmp_path, monke
     assert 'name="observation_mode"' not in page.text
     script = client.get("/static/app.js")
     assert 'class="seat-full-vision"' in script.text
+    assert 'statButton("evaluation"' in script.text
     assert 'name="league_reroll_interval"' in page.text
     assert 'data-preset="learner-vs-league"' in page.text
     config = client.get("/api/config")

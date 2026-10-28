@@ -1,3 +1,4 @@
+import pytest
 from spark.storage.stats import mean_ci, wilson_ci
 from spark.training.trainer import Trainer, TrainerConfig
 from spark.storage import RunDatabase
@@ -31,6 +32,8 @@ def test_statistics_include_confidence_intervals(tmp_path):
     assert "0" in stats["rolling"][-1]["seats"]
     assert "1" in stats["rolling"][-1]["seats"]
     assert "average_payoff" in stats["rolling"][-1]["seats"]["1"]
+    assert "win_rate" in stats["rolling"][-1]["seats"]["0"]
+    assert "episodes_per_second" in stats["rolling"][-1]["seats"]["0"]
     assert stats["highlights"]["seat_0_win_rate_ci"][0] <= stats["highlights"]["seat_0_win_rate"]
 
 
@@ -75,6 +78,8 @@ def test_statistics_rolling_series_stays_capped(tmp_path):
     assert stats["rolling"][0]["episode"] == 1
     assert stats["rolling"][-1]["episode"] == 500
     assert stats["rolling"][-1]["seats"]["0"]["cumulative_average"] == 1.0
+    assert stats["rolling"][-1]["seats"]["0"]["win_rate"] == 1.0
+    assert stats["rolling"][-1]["seats"]["0"]["episodes_per_second"] == pytest.approx(10.0)
 
 
 def test_q_table_size_series_reports_distinct_states(tmp_path):

@@ -505,13 +505,23 @@ class RunDatabase:
         recent_by_seat: dict[int, list[float]] = {}
         recent_sum_by_seat: dict[int, float] = {}
         cumulative_by_seat: dict[int, float] = {}
+        win_by_seat: dict[int, list[int]] = {}
+        win_sum_by_seat: dict[int, int] = {}
+        duration_window: list[float] = []
+        duration_sum = 0.0
         action_totals: dict[tuple[str, int], int] = {}
         metadata_step_counts: list[float] = []
         sample_indexes = self._downsample_indexes(len(payoff_rows), rolling_points)
         for row_index, row in enumerate(payoff_rows):
             payoffs = [float(value) for value in json.loads(row["payoffs_json"])]
             outcomes = json.loads(row["outcomes_json"])
-            durations.append(float(row["duration_seconds"] or 0))
+            duration = float(row["duration_seconds"] or 0)
+            durations.append(duration)
+            duration_sum += duration
+            duration_window.append(duration)
+            if len(duration_window) > rolling_limit:
+                duration_sum -= duration_window.pop(0)
+            pace = len(duration_window) / duration_sum if duration_sum > 0 else 0.0
             step_count = int(row["step_count"] or 0)
             if step_count > 0:
                 metadata_step_counts.append(float(step_count))
@@ -537,12 +547,22 @@ class RunDatabase:
                 recent_by_seat[seat] = window
                 recent_sum_by_seat[seat] = window_sum
                 cumulative_by_seat[seat] = cumulative_by_seat.get(seat, 0.0) + payoff
+                won = 1 if payoff > 0 else 0
+                win_window = win_by_seat.setdefault(seat, [])
+                win_sum = win_sum_by_seat.get(seat, 0) + won
+                win_window.append(won)
+                if len(win_window) > rolling_limit:
+                    win_sum -= win_window.pop(0)
+                win_by_seat[seat] = win_window
+                win_sum_by_seat[seat] = win_sum
                 if sampled:
                     seat_points[str(seat)] = {
                         "average_payoff": window_sum / len(window),
                         "ci_low": None,
                         "ci_high": None,
                         "cumulative_average": cumulative_by_seat[seat] / episode_index,
+                        "win_rate": win_sum / len(win_window) if win_window else 0.0,
+                        "episodes_per_second": pace,
                     }
             if not sampled:
                 continue

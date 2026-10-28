@@ -49,26 +49,10 @@
             </div>
             <span id="trend-window">Last 100 episodes</span>
           </div>
-          <div class="chart-legend" aria-label="Chart legend">
-            <span><i class="legend-line rolling"></i>Rolling mean</span>
-            <span><i class="legend-line cumulative"></i>Cumulative mean</span>
-          </div>
-          <canvas id="payoff-chart" width="900" height="300"></canvas>
-        </article>
-      </section>
-
-      <section class="overview-section">
-        <article class="panel trend-panel">
-          <div class="panel-title">
-            <div>
-              <p class="eyebrow">Evaluation</p>
-              <h3 id="eval-chart-title">Test payoff by evaluation round</h3>
-            </div>
-            <span id="eval-window"></span>
-          </div>
-          <div id="eval-opponent-lineup" class="seat-lineup" aria-label="Select League opponent"></div>
-          <canvas id="eval-chart" width="1800" height="600" aria-label="Evaluation chart for selected opponent"></canvas>
-          <p id="eval-empty" class="help"></p>
+          <div id="chart-legend" class="chart-legend" aria-label="Chart legend"></div>
+          <div id="eval-opponent-lineup" class="seat-lineup hidden" aria-label="Select League opponent"></div>
+          <canvas id="payoff-chart" width="900" height="340" aria-label="Selected training statistic"></canvas>
+          <p id="eval-empty" class="help hidden"></p>
         </article>
       </section>
 
@@ -327,6 +311,6 @@
 
   </main>
 
-  <script src="static/app.js?v=overview-7"></script>
+  <script src="static/app.js?v=overview-9"></script>
 </body>
 </html>
