@@ -50,6 +50,9 @@ class TrainerConfig:
     small_blind: int = DEFAULT_SMALL_BLIND
     big_blind: int = DEFAULT_BIG_BLIND
     episode_mode: str = DEFAULT_EPISODE_MODE
+    # 0 = unlimited raises on a street. A positive number is the cap for
+    # no-limit Hold'em. Limit and Leduc keep their own betting rules.
+    max_raises: int = 0
     # Seats that are shown every opponent's hole cards. Each seat config may
     # also carry ``"full_vision": true``; this list is the CLI shortcut for the
     # ``--agents`` form. Everyone else plays normal poker.
@@ -86,6 +89,7 @@ class Trainer:
                 f"{self.config.big_blind}."
             )
         self.config.episode_mode = normalize_episode_mode(config.episode_mode)
+        self.config.max_raises = max(0, int(config.max_raises))
         self.config.full_vision_seats = sorted(
             {int(seat) for seat in (config.full_vision_seats or [])}
         )
@@ -127,6 +131,7 @@ class Trainer:
             small_blind=self.config.small_blind,
             big_blind=self.config.big_blind,
             episode_mode=self.config.episode_mode,
+            max_raises=self.config.max_raises,
         )
         self._apply_full_vision(environment)
         return environment
@@ -762,9 +767,17 @@ class Trainer:
             )
         if "episode_mode" in saved_config:
             self.config.episode_mode = normalize_episode_mode(saved_config["episode_mode"])
+        if "max_raises" in saved_config:
+            self.config.max_raises = max(0, int(saved_config["max_raises"]))
         if any(
             key in saved_config
-            for key in ("starting_stack", "small_blind", "big_blind", "episode_mode")
+            for key in (
+                "starting_stack",
+                "small_blind",
+                "big_blind",
+                "episode_mode",
+                "max_raises",
+            )
         ):
             self.environment = self._create_environment()
             self._eval_environment = None

@@ -163,6 +163,7 @@ class AgentSnapshotStore:
         small_blind: int = 1,
         big_blind: int = 2,
         episode_mode: str = "session",
+        max_raises: int = 0,
         league_store: Any | None = None,
     ) -> Path:
         run_id = self._run_id(run_id)
@@ -250,6 +251,7 @@ class AgentSnapshotStore:
                 "small_blind": max(1, int(small_blind)),
                 "big_blind": max(max(1, int(small_blind)), int(big_blind)),
                 "episode_mode": normalize_episode_mode(episode_mode),
+                "max_raises": max(0, int(max_raises)),
             },
             "next_episode_number": 0,
             "agent_version": 0,

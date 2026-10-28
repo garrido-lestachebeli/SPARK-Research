@@ -69,6 +69,7 @@ class CampaignRequest(BaseModel):
     small_blind: int = Field(default=1, ge=1)
     big_blind: int = Field(default=2, ge=1)
     episode_mode: Literal["session", "hand"] = "session"
+    max_raises: int = Field(default=0, ge=0)
     partition: str | None = None
     cpus: int = Field(default=1, ge=1, le=256)
     memory: str = "4G"

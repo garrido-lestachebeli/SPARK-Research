@@ -1,13 +1,13 @@
 """No-Limit Hold'em DQN.
 
 Learning settings (gamma, epsilon, replay size, and the rest) live on
-``NoLimitHoldemDQNAgent``. The shared 118-vector encoder lives in ``agent.py``.
+``NoLimitHoldemDQNAgent``. The shared one-hot card encoder lives in ``agent.py``.
 
 Write these four functions. Until they stop raising ``NotImplementedError``:
 
 - the agent chooses a uniform legal action
 - transitions are stored, but no gradient step runs
-- the network input stays the 118-number public vector
+- the network input stays the public vector from ``agent.encode_observation``
 
 A hand is an unordered pair of card ids such as ``("SA", "HK")``. Card ids
 match RLCard: suit ``S/H/D/C`` plus rank ``A,2-9,T,J,Q,K``.
@@ -26,7 +26,6 @@ from spark.agents.no_limit_holdem.agent import (  # noqa: F401 - card codes re-e
     CARD_BOARD,
     CARD_HOLE,
     CARD_OPPONENT,
-    CARD_UNSEEN,
     FEATURE_DIM,
     encode_observation,
     terminal_reward,
@@ -44,7 +43,7 @@ from spark.models import Episode
 # ---------------------------------------------------------------------------
 
 # Q-network hidden widths. build_q_network receives state_dim and action_dim
-# from this agent: action_dim is always 5, and state_dim is 118 plus the
+# from this agent: action_dim is always 5, and state_dim is FEATURE_DIM plus the
 # belief features plus HAND_FEATURE_DIM.
 HIDDEN_LAYERS: tuple[int, ...] = ()
 
@@ -70,8 +69,9 @@ RAISE_HALF_POT = 2
 RAISE_POT = 3
 ALL_IN = 4
 
-# Card codes in the first 52 slots of the public vector are shared with every
-# No-Limit agent: CARD_UNSEEN, CARD_BOARD, CARD_HOLE, CARD_OPPONENT in agent.py.
+# Card location channels (0/1 flags, not magnitudes) are shared with every
+# No-Limit agent: CARD_BOARD, CARD_HOLE, CARD_OPPONENT in agent.py. All three
+# zero means the card is unseen.
 
 # Illegal Q-values are pushed below every legal action inside the forward pass.
 _ILLEGAL_Q = -1.0e9
@@ -405,7 +405,7 @@ class NoLimitHoldemDQNAgent(Agent):
         return globals()["build_q_network"](state_dim, action_dim)
 
     def encode(self, observation: dict[str, Any]) -> list[float]:
-        """Public 118-vector, then belief features, then hero hand strength."""
+        """Public one-hot vector, then belief features, then hero hand strength."""
         vector = encode_observation(observation)
         try:
             vector = vector + [float(value) for value in self.belief_features()]
@@ -418,7 +418,7 @@ class NoLimitHoldemDQNAgent(Agent):
         )
 
     def state_dim(self) -> int:
-        """Network input length: 118, plus belief features once written, plus hand strength."""
+        """Network input length: public vector, plus belief features, plus hand strength."""
         try:
             belief_dim = len(self.belief_features())
         except NotImplementedError:
@@ -595,7 +595,7 @@ class NoLimitHoldemDQNAgent(Agent):
         return globals()["bayes_update"](prior_belief, likelihoods, action)
 
     def belief_features(self) -> list[float]:
-        """Call the module-level ``belief_features``. While it raises, the vector stays length 118."""
+        """Call the module-level ``belief_features``. While it raises, nothing is appended."""
         return globals()["belief_features"](self.belief)
 
     def _prepare_belief(self, observation: dict[str, Any]) -> None:

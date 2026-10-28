@@ -41,6 +41,7 @@ def test_dashboard_serves_statistics_without_episode_replay_logs(tmp_path, monke
     assert 'name="small_blind"' in page.text
     assert 'name="big_blind"' in page.text
     assert 'name="episode_mode"' in page.text
+    assert 'name="max_raises"' in page.text
     assert 'name="observation_mode"' not in page.text
     script = client.get("/static/app.js")
     assert 'class="seat-full-vision"' in script.text

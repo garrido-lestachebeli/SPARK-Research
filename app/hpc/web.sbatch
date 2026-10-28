@@ -22,6 +22,18 @@ port="${SPARK_WEB_PORT:-8000}"
 bind_host="${SPARK_BIND_HOST:-0.0.0.0}"
 ondemand_base="${SPARK_ONDEMAND_URL:-https://dh-ood.hpc.msoe.edu}"
 
+: "${SPARK_ACCESS_TOKEN:?SPARK_ACCESS_TOKEN is required}"
+export SPARK_WEB_PORT="${port}"
+export SPARK_NODE_NAME="${node_name}"
+export SPARK_ONDEMAND_URL="${ondemand_base}"
+dashboard_url="$(
+  python3 -c 'from spark.slurm.client import ondemand_dashboard_url; import os; print(ondemand_dashboard_url(os.environ["SPARK_NODE_NAME"], int(os.environ["SPARK_WEB_PORT"]), os.environ["SPARK_ACCESS_TOKEN"], base=os.environ["SPARK_ONDEMAND_URL"]))'
+)"
+printf '%s\n' "${dashboard_url}" > data/dashboard.url
+if [[ -n "${SLURM_JOB_ID:-}" ]]; then
+  printf '%s\n' "${SLURM_JOB_ID}" > data/dashboard.job
+fi
+
 echo "SPARK dashboard node: ${node_name}"
 echo "SPARK dashboard port: ${port}"
 echo "SPARK bind host: ${bind_host}"
@@ -29,10 +41,10 @@ echo "SPARK SSH user: ${USER}"
 echo "Token: ${SPARK_ACCESS_TOKEN}"
 echo ""
 echo "Preferred access on Rosie (Open OnDemand):"
-echo "  ${ondemand_base}/rnode/${node_name}/${port}/?token=${SPARK_ACCESS_TOKEN}"
+echo "  ${dashboard_url}"
 echo "  ${ondemand_base}/node/${node_name}/${port}/?token=${SPARK_ACCESS_TOKEN}"
 echo ""
-echo "SSH tunnels only work if Windows can resolve a login host."
+echo "This address is also in data/dashboard.url and is rewritten if the job is requeued onto a new node."
 echo "Compute nodes like ${node_name} are usually not in campus DNS."
 echo ""
 

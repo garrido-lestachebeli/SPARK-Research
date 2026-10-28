@@ -168,6 +168,10 @@
                 <option value="hand">Single hand</option>
               </select>
             </label>
+            <label title="How many raises are allowed before the next card in no-limit Hold'em. 0 means no cap. Check, call, and fold stay legal.">
+              Raises per street
+              <input name="max_raises" type="number" min="0" step="1" value="0">
+            </label>
             <label>Checkpoint interval<input name="checkpoint_interval" type="number" min="1" value="100"></label>
             <label>Agent memory<input name="agent_memory_size" type="number" min="0" value="100"></label>
             <label>CPU cores<input name="cpus" type="number" min="1" value="1"></label>
@@ -187,6 +191,9 @@
             Tick <strong>Sees all cards</strong> on a seat to show that one agent every
             opponent's hole cards while the rest of the table plays normal poker. Use it
             to check that a learner improves when nothing is hidden from it, then untick.
+            Raises per street limits no-limit Hold'em. 0 leaves a street uncapped;
+            a positive number drops half-pot, pot, and all-in once that many raises
+            have been made. The blinds do not count.
           </p>
           <button type="submit" class="primary">Submit campaign</button>
           <p id="campaign-message" class="message"></p>
@@ -320,6 +327,6 @@
 
   </main>
 
-  <script src="static/app.js?v=overview-6"></script>
+  <script src="static/app.js?v=overview-7"></script>
 </body>
 </html>

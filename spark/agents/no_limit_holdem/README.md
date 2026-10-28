@@ -3,7 +3,7 @@
 This file is the field guide for the No-Limit Texas Hold'em environment.
 
 `spark/agents/no_limit_holdem/agent.py` is shared by every No-Limit agent. It
-holds the action names and the 118-number encoder. It is not itself an agent,
+holds the action names and the one-hot card encoder. It is not itself an agent,
 and it does not hold learning settings.
 
 `spark/agents/no_limit_holdem/dqn.py` is the DQN. Gamma, the learning rate,
@@ -23,7 +23,7 @@ Heads-up or a larger table, from 2 to 10 players. The campaign form and the
 training command set the buy-in and the blinds. Defaults are a starting stack
 of 50 chips, a small blind of 1, and a big blind of 2, so a default hand is
 25 big blinds deep. The big blind must be at least the small blind, and the
-starting stack must cover the big blind. Chip features in the 118-vector, and
+starting stack must cover the big blind. Chip features in the observation vector, and
 the terminal reward, divide by the big blind of that hand.
 
 RLCard does not accept an arbitrary raise size. Every decision is one of five
@@ -40,6 +40,13 @@ actions:
 Fold and check/call are always legal. A raise drops out of the legal list when
 the player does not have the chips, or when a half-pot raise would not actually
 increase the bet. The trainer rejects an action that is not in `legal_actions`.
+
+The campaign form's **Raises per street** field caps no-limit betting. `0`
+(the default) leaves a street uncapped, which is RLCard's own rule. A positive
+number counts half-pot, pot, and all-in. Once that many raises have been made,
+those three actions leave the legal list until the next card. The blinds are
+not raises, and check, call, and fold stay available. Limit and Leduc ignore
+this setting.
 
 A hand deals two hole cards each, posts the blinds, then runs preflop, flop
 (3 cards), turn (1), and river (1). A street ends when everyone still in the
@@ -169,11 +176,18 @@ still contests the pot and also takes no more turns. When it is your turn, your
 own folded and all-in slots are `0`. The slots that change your decision are
 the other seats.
 
-## The 118-number vector
+## The observation vector
 
-`agent.encode(observation)` returns a list of 118 floats. That length is
-`FEATURE_DIM` in `agent.py`. A 2-player hand and a 10-player hand both produce
-118 numbers. Empty seat blocks are zeros.
+`encode_public` returns a list of 222 floats. That length is `FEATURE_DIM` in
+`agent.py`. A 2-player hand and a 10-player hand both produce 222 numbers.
+Empty seat blocks are zeros. `agent.encode` appends belief features and hero
+hand-strength features after this public vector, so the network input is
+longer than 222.
+
+Each card is three 0/1 flags: board, hole, and opponent. At most one is 1.
+All three zero means the card is unseen. A separate unseen flag would only
+repeat that, and a linear layer would otherwise treat "in the hand" as twice
+"on the board".
 
 Chip amounts in this vector are divided by the big blind. A pot of 10 chips
 with a blind of 2 is stored as `5`. A starting stack of 50 chips is stored as
@@ -183,13 +197,13 @@ instead would turn both into `1.0`.
 
 | Indexes | Contents |
 | --- | --- |
-| 0–51 | One slot per card. `0` unseen, `1` on the board, `2` in this player's hand, `3` in an opponent's hand (only for a seat with "Sees all cards" ticked). |
-| 52–55 | Street, one-hot. 52 preflop, 53 flop, 54 turn, 55 river. |
-| 56 | Pot, in big blinds. |
-| 57 | Amount still needed to call, in big blinds. |
-| 58–117 | Ten seat blocks of 6 numbers. Block 0 starts at 58. |
+| 0–155 | 52 cards × 3 flags. Card `i` starts at `3i`: board, hole, opponent. All zeros means unseen. |
+| 156–159 | Street, one-hot. 156 preflop, 157 flop, 158 turn, 159 river. |
+| 160 | Pot, in big blinds. |
+| 161 | Amount still needed to call, in big blinds. |
+| 162–221 | Ten seat blocks of 6 numbers. Block 0 starts at 162. |
 
-Seat block `k` starts at index `58 + 6k`. The six numbers, in order, are:
+Seat block `k` starts at index `162 + 6k`. The six numbers, in order, are:
 
 | Offset | Name | Value |
 | --- | --- | --- |
@@ -204,10 +218,10 @@ Block 0 is always the player who is acting. Block 1 is the next seat in play
 order (`hero_seat + 1`, wrapping around the table). Then the rest of the
 table. After a 3-player hand, blocks 3 through 9 are zeros.
 
-The player on your left has folded when index 67 is `1`
-(`58 + 6 + 3`). That same player is all-in when index 68 is `1`.
+The player on your left has folded when index 171 is `1`
+(`162 + 6 + 3`). That same player is all-in when index 172 is `1`.
 
-The five legal-action flags are not inside these 118 numbers. `forward_pass`
+The five legal-action flags are not inside these 222 numbers. `forward_pass`
 receives `legal_actions` and sets each illegal Q-value to `-1e9` before
 `argmax` or `max`. `legal_mask(legal_actions)` returns the same information as
 five `0/1` numbers if you want it for debugging.
@@ -216,8 +230,9 @@ This vector is a Markov view of the decision. Current cards, stacks,
 commitments, who has folded, who is all-in, and where the button sits already
 summarize the betting. The action history does not need to go into the network.
 
-The card codes are named in `agent.py`: `CARD_UNSEEN = 0`, `CARD_BOARD = 1`,
-`CARD_HOLE = 2`, `CARD_OPPONENT = 3`.
+The channel offsets are named in `agent.py`: `CARD_BOARD = 0`, `CARD_HOLE = 1`,
+`CARD_OPPONENT = 2`. They are positions inside a card's block, not magnitudes.
+There is no unseen channel.
 
 ### Sees all cards: one seat with perfect information
 
@@ -228,11 +243,13 @@ while its opponents keep playing real poker. In a seat config it is
 `--full-vision-seats 0`.
 
 - Unticked (default) is normal poker. `public["full_vision"]` is `False`,
-  `public` never contains an opponent's cards, and code `3` never appears in
-  that seat's vector.
+  `public` never contains an opponent's cards, and every card that is not the
+  hero's hole cards or the board is all zeros. The opponent flag is 0 for
+  all 52 cards, so a hidden hole card looks the same as a card still in the deck.
 - Ticked: `public["full_vision"]` is `True` and `public["opponent_hole_cards"]`
-  maps every other seat id to that seat's two cards. `encode()` writes those
-  cards as `3` in the 52 card slots.
+  maps every other seat id to that seat's two cards. `encode()` turns on the
+  opponent flag for those cards. Hero cards stay on the hole flag and board
+  cards stay on the board flag.
 
 Use it as a learning check. If a learner cannot beat Call Only even when it can
 see every card, the problem is the network or the update, not the hidden
@@ -240,11 +257,12 @@ information. Leave the opponents unticked so the test is still "can it exploit
 what it knows", and untick the learner again once it clears that bar. The
 built-in bots read only their own cards, so ticking them changes nothing.
 
-The vector is 118 numbers either way, so the same saved network loads in both
+The vector is 222 numbers either way, so the same saved network loads in both
 settings. A learner trained unticked can continue ticked and back without a
-new member. With three or more players, code `3` says a card is in some
-opponent's hand but not whose. Heads-up it is exact. The environment records
-the chosen seats as `full_vision_seats` in `hidden_state()`.
+new member. A network trained on the old 0/1/2/3 card codes will not load:
+the input length changed. With three or more players, the opponent flag says
+a card is in some opponent's hand but not whose. Heads-up it is exact. The
+environment records the chosen seats as `full_vision_seats` in `hidden_state()`.
 
 ## Reward and gamma
 
@@ -292,7 +310,7 @@ and five other agents in evaluate mode. The environment does not care which
 policy sits in a seat.
 
 Each learning seat stores only its own decisions. The other seats acting in the
-same hand means they act before this seat's next state. The 118-vector already
+same hand means they act before this seat's next state. The observation vector already
 has room for them. You do not build a second encoder when the table grows. You
 fill more seat blocks.
 
@@ -307,9 +325,9 @@ switch to this agent by accident.
 
 | Function | What it does now |
 | --- | --- |
-| `encode(observation)` | Builds the 118-vector from `observation["public"]`. |
+| `encode(observation)` | Builds the public vector from `observation["public"]`, then appends belief and hand-strength features. |
 | `terminal_reward(payoff, big_blind)` | Divides the chip result by the big blind. |
-| `legal_mask(legal_actions)` | Length-5 `0/1` mask. Not part of the 118-vector. |
+| `legal_mask(legal_actions)` | Length-5 `0/1` mask. Not part of the observation vector. |
 | `ReplayBuffer.add / sample / purge` | Stores transitions and drops the oldest past `replay_size`. |
 | `purge_replay_buffer()` | Trims the buffer to capacity. |
 | `forward_pass(state, main, mask_illegal, legal_actions, grad)` | Runs the main or target network. Returns `None` until a network exists. `grad=False` is for action choice and for the target. |
@@ -343,11 +361,12 @@ them. Gamma and the other learning settings are on the class in the same file.
 | `build_q_network(state_dim, action_dim)` | A `torch.nn.Module`. Input shape `(batch, state_dim)`, output shape `(batch, 5)`. |
 | `prior(belief, seat, hands)` | `P(hand)` before the latest action. Uniform on the first action. Later, the previous posterior with impossible hands removed, renormalized. |
 | `bayes_update(prior, likelihoods, action)` | `P(hand \| action)` proportional to `P(action \| hand) * P(hand)`, summing to 1. If every likelihood is 0, return the prior. |
-| `belief_features(belief)` | The list of numbers to append to the 118-vector. Leave it raising until you want belief in the network. |
+| `belief_features(belief)` | The list of numbers to append after the public vector. Leave it raising until you want belief in the network. |
 
-`state_dim` is 118 while `belief_features` raises. When that function returns
-a list, `encode` concatenates it and the network is built with
-`118 + len(list)`. Import torch inside `build_q_network`. The next call to
+`state_dim` is `FEATURE_DIM` (222) plus the hero hand-strength block while
+`belief_features` raises. When that function returns a list, `encode`
+concatenates it and the network input grows by `len(list)`. Import torch
+inside `build_q_network`. The next call to
 `select_action` or `update` builds a target copy and an Adam optimizer from
 the module you return.
 

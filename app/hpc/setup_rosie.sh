@@ -11,4 +11,7 @@ python -m pip install -r requirements.txt
 mkdir -p data
 
 echo "ROSIE environment ready at ${project_root}/.venv"
-echo "Start the dashboard with: bash app/hpc/start_dashboard.sh"
+echo "From an SSH session on a Rosie login node:"
+echo "  bash app/hpc/start_dashboard.sh"
+echo "Close SSH after it prints the job id. From a later session:"
+echo "  bash app/hpc/dashboard_status.sh"

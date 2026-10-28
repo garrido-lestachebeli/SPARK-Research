@@ -62,6 +62,7 @@ def create_environment(
     max_hands: int | None = None,
     episode_mode: str | None = None,
     full_vision_seats: Iterable[int] | None = None,
+    max_raises: int | None = None,
 ) -> EnvironmentAdapter:
     info = _INFO.get(environment_id)
     if info is None:
@@ -88,6 +89,8 @@ def create_environment(
         kwargs["episode_mode"] = str(episode_mode)
     if full_vision_seats is not None:
         kwargs["full_vision_seats"] = [int(seat) for seat in full_vision_seats]
+    if max_raises is not None:
+        kwargs["max_raises"] = max(0, int(max_raises))
     return _FACTORIES[environment_id](table_size, **kwargs)
 
 

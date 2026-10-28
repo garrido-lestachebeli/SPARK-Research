@@ -4,7 +4,13 @@ from pathlib import Path
 
 import pytest
 
-from spark.slurm.client import SlurmClient
+from spark.slurm.client import SlurmClient, ondemand_dashboard_url
+
+
+def test_ondemand_dashboard_url_uses_rnode_form():
+    assert ondemand_dashboard_url("dh-node01", 8000, "abc") == (
+        "https://dh-ood.hpc.msoe.edu/rnode/dh-node01/8000/?token=abc"
+    )
 
 
 def test_parse_sbatch_job_id():

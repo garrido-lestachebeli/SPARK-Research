@@ -174,16 +174,6 @@ fieldset { border: 1px solid var(--line); border-radius: 10px; margin: 1rem 0; }
   display: grid;
   gap: .45rem;
 }
-.seat-configuration .seat-full-vision-label {
-  grid-column: 1 / -1;
-  display: flex;
-  align-items: center;
-  gap: .4rem;
-  color: var(--muted);
-  cursor: pointer;
-  user-select: none;
-}
-.seat-configuration .seat-full-vision-label input { margin: 0; }
 .seat-advanced { margin-top: .2rem; }
 .seat-advanced summary { cursor: pointer; color: var(--muted); font-size: .75rem; }
 .preset-row {
@@ -324,10 +314,9 @@ fieldset { border: 1px solid var(--line); border-radius: 10px; margin: 1rem 0; }
 .league-stat strong { font-size: 1.1rem; }
 
 .inline-controls { display: flex; min-width: min(600px, 60vw); gap: .7rem; }
-
 @media (max-width: 900px) {
   .snapshot-grid { grid-template-columns: 1fr 1fr; }
-  .breakdown-grid, .split, .league-columns { grid-template-columns: 1fr; }
+  .breakdown-grid, .split, .replay-layout, .league-columns { grid-template-columns: 1fr; }
   .inline-controls { min-width: 0; width: 100%; }
   .agent-save-form { grid-template-columns: 1fr; }
   .seat-configuration { grid-template-columns: 1fr; }

@@ -113,6 +113,15 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--max-raises",
+        type=int,
+        default=0,
+        help=(
+            "Most raises allowed on one street in no-limit Hold'em. "
+            "0 means no cap. Check, call, and fold stay legal."
+        ),
+    )
+    parser.add_argument(
         "--full-vision-seats",
         type=int,
         nargs="*",
@@ -161,6 +170,7 @@ def main() -> None:
             big_blind=max(1, int(args.big_blind)),
             episode_mode=args.episode_mode,
             full_vision_seats=list(args.full_vision_seats or []),
+            max_raises=max(0, int(args.max_raises)),
         )
     )
     completed = trainer.run(resume=not args.no_resume)

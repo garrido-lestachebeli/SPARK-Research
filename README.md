@@ -146,13 +146,30 @@ cd ~/SummerResearch   # or your clone path
 bash app/hpc/setup_rosie.sh
 source .venv/bin/activate
 
-# From Shell Access / an interactive job on dh-node*:
-bash app/hpc/run_dashboard_ondemand.sh
+# From an SSH session on a login node. This submits the dashboard and exits.
+bash app/hpc/start_dashboard.sh
 ```
 
-Open the printed URL (keep `?token=...`). Campaigns submit one Slurm job per
-environment via `app/hpc/train.sbatch`. Near wall-time the job checkpoints and
-requeues. See the [ROSIE User Guide](https://msoe.dev/#/) for partitions and limits.
+Close the SSH session after it prints the job id. The dashboard is a Slurm job,
+so it keeps running. Training campaigns submitted in the browser are separate
+Slurm jobs (`app/hpc/train.sbatch`) and keep writing each hand while you are
+away. The page polls those jobs every 15 seconds.
+
+From a later SSH session:
+
+```bash
+bash app/hpc/dashboard_status.sh
+```
+
+That prints the job state and the current Open OnDemand URL (`data/dashboard.url`).
+The URL is rewritten if the dashboard is requeued onto a new node. A pending job
+has no URL yet; run the status command again after it starts.
+
+`bash app/hpc/run_dashboard_ondemand.sh` is the alternative when you already have
+an interactive shell on a compute node. Closing that shell stops the page only.
+A training job already submitted with `sbatch` keeps running. Near wall-time a
+training job checkpoints and requeues. See the
+[ROSIE User Guide](https://msoe.dev/#/) for partitions and limits.
 
 ## Adding an agent
 

@@ -1485,7 +1485,7 @@ async function loadCampaigns() {
       ${campaign.jobs.map((job) => `
         <div class="job">
           <div><strong>${escapeHtml(job.environment)}</strong>
-            <small>${escapeHtml(job.run_id)} · ${escapeHtml(job.scheduler_id || "not submitted")}</small>
+            <small>${escapeHtml(job.run_id)} · ${escapeHtml(job.scheduler_id || "not submitted")} · ${Number(campaign.config?.max_raises) > 0 ? `${Number(campaign.config.max_raises)} raise(s) per street` : "unlimited raises"}</small>
             <small>${(campaign.config?.tables?.[job.environment]?.seats || [])
               .map((seat, index) => {
                 const source = seat.source || "fresh";
@@ -1606,6 +1606,7 @@ async function submitCampaign(event) {
     small_blind: Number(form.get("small_blind") || 1),
     big_blind: Number(form.get("big_blind") || 2),
     episode_mode: form.get("episode_mode") || "session",
+    max_raises: Number(form.get("max_raises") || 0),
     agent_memory_size: Number(form.get("agent_memory_size")),
     cpus: Number(form.get("cpus")),
     memory: form.get("memory"),

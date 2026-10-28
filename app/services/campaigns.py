@@ -62,6 +62,7 @@ class CampaignService:
                 "Starting stack must be at least the big blind."
             )
         config["episode_mode"] = normalize_episode_mode(config.get("episode_mode", "session"))
+        config["max_raises"] = max(0, int(config.get("max_raises", 0)))
 
         campaign_id = f"campaign-{uuid.uuid4().hex[:10]}"
         name = str(config.get("name") or campaign_id)
@@ -97,6 +98,7 @@ class CampaignService:
                 small_blind=int(config.get("small_blind", 1)),
                 big_blind=int(config.get("big_blind", 2)),
                 episode_mode=str(config.get("episode_mode", "session")),
+                max_raises=int(config.get("max_raises", 0)),
                 league_store=self.league,
             )
             if self.slurm.available:
@@ -412,6 +414,9 @@ class CampaignService:
             config["episode_mode"] = normalize_episode_mode(
                 run_config.get("episode_mode", config.get("episode_mode", "session"))
             )
+            config["max_raises"] = max(
+                0, int(run_config.get("max_raises", config.get("max_raises", 0)))
+            )
         self.runs.clear_stop(run_id)
         if self.slurm.available:
             scheduler_id = self.slurm.submit_training(config)
@@ -507,6 +512,8 @@ class CampaignService:
             str(config.get("big_blind", 2)),
             "--episode-mode",
             str(config.get("episode_mode", "session")),
+            "--max-raises",
+            str(config.get("max_raises", 0)),
         ]
         if config.get("seat_configs"):
             command.extend(

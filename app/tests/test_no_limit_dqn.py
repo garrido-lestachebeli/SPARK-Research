@@ -7,7 +7,10 @@ import pytest
 from spark.agents import create_agent
 from spark.agents.no_limit_holdem import dqn as dqn_math
 from spark.agents.no_limit_holdem.agent import (
+    CARD_BOARD,
     CARD_HOLE,
+    CARD_INDEX,
+    CARD_LOCATIONS,
     CARD_OPPONENT,
     CARD_SLOTS,
     FEATURE_DIM,
@@ -23,6 +26,22 @@ from spark.agents.no_limit_holdem.agent import (
 )
 from spark.environments.no_limit_holdem import NoLimitHoldemAdapter, possible_hole_pairs
 from spark.models import Episode, EpisodeStep
+
+
+def _location_counts(vector: list[float]) -> list[int]:
+    """How many cards sit on each location flag. A card may also be all zeros."""
+    counts = [0] * CARD_LOCATIONS
+    blank = 0
+    for card_index in range(CARD_SLOTS):
+        block = vector[card_index * CARD_LOCATIONS : (card_index + 1) * CARD_LOCATIONS]
+        assert set(block) <= {0.0, 1.0}
+        assert sum(block) <= 1.0
+        if sum(block) == 0.0:
+            blank += 1
+        else:
+            counts[block.index(1.0)] += 1
+    assert blank + sum(counts) == CARD_SLOTS
+    return counts
 
 
 def _public_hand() -> dict:
@@ -130,7 +149,7 @@ def test_only_full_vision_seats_are_shown_opponent_cards():
     for seat in (0, 2):
         assert seen[seat]["full_vision"] is False
         assert "opponent_hole_cards" not in seen[seat]
-        assert CARD_OPPONENT not in encode_public(seen[seat])[:CARD_SLOTS]
+        assert _location_counts(encode_public(seen[seat]))[CARD_OPPONENT] == 0
 
     public = seen[1]
     assert public["full_vision"] is True
@@ -142,9 +161,9 @@ def test_only_full_vision_seats_are_shown_opponent_cards():
     json.dumps(public)
     vector = encode_public(public)
     assert len(vector) == FEATURE_DIM
-    cards = vector[:CARD_SLOTS]
-    assert cards.count(CARD_OPPONENT) == 4
-    assert cards.count(CARD_HOLE) == 2
+    counts = _location_counts(vector)
+    assert counts[CARD_OPPONENT] == 4
+    assert counts[CARD_HOLE] == 2
 
     with pytest.raises(ValueError):
         NoLimitHoldemAdapter(2, full_vision_seats=[2])
@@ -174,11 +193,12 @@ def test_short_stack_blind_is_visible_as_all_in():
 
 def test_encode_layout_rotates_hero_to_block_zero():
     vector = encode_public(_public_hand())
-    assert len(vector) == FEATURE_DIM == 118
-    assert vector[0] == 2.0  # SA in the hole
-    assert vector[25] == 2.0  # HK in the hole
-    assert vector[27] == 1.0  # D2 on the board
-    assert sum(value == 2.0 for value in vector[:52]) == 2
+    assert len(vector) == FEATURE_DIM == 222
+    assert vector[CARD_INDEX["SA"] * CARD_LOCATIONS + CARD_HOLE] == 1.0
+    assert vector[CARD_INDEX["HK"] * CARD_LOCATIONS + CARD_HOLE] == 1.0
+    assert vector[CARD_INDEX["D2"] * CARD_LOCATIONS + CARD_BOARD] == 1.0
+    assert _location_counts(vector)[CARD_HOLE] == 2
+    assert _location_counts(vector)[CARD_OPPONENT] == 0
     assert vector[STREET_INDEX : STREET_INDEX + 4] == [0.0, 1.0, 0.0, 0.0]
     assert vector[POT_INDEX] == 5.0
     assert vector[TO_CALL_INDEX] == 1.0
@@ -209,7 +229,7 @@ def test_agent_only_picks_legal_actions_and_stores_big_blind_reward():
             decision.player_id,
         )
         assert choice in decision.legal_actions
-    assert len(agent.encode(decision.observation)) == 118
+    assert len(agent.encode(decision.observation)) == agent.state_dim()
 
     first = _public_hand()
     first["hero_seat"] = 0
@@ -242,7 +262,7 @@ def test_agent_only_picks_legal_actions_and_stores_big_blind_reward():
 
 def test_checkpoint_roundtrip_keeps_epsilon_without_requiring_a_network():
     agent = create_agent("no-limit-dqn", seed=1, config={"epsilon": 0.4, "seat_id": 0})
-    agent.memory.add([0.0] * 118, 1, 0.0, None, [], True)
+    agent.memory.add([0.0] * FEATURE_DIM, 1, 0.0, None, [], True)
     state = agent.state_dict()
     assert state["memory"] == []
     state["memory"] = agent.memory.state_dict()
@@ -254,7 +274,7 @@ def test_checkpoint_roundtrip_keeps_epsilon_without_requiring_a_network():
     assert len(restored.memory) == 1
     assert restored.q_network is None
     with pytest.raises(NotImplementedError):
-        restored.build_q_network(118, 5)
+        restored.build_q_network(FEATURE_DIM, 5)
 
 
 def _facing(hole: list[str], board: list[str], to_call: float) -> dict:
@@ -360,7 +380,7 @@ def test_hypothetical_observation_shows_the_guessed_hand():
 
 def test_open_functions_raise_and_play_stays_legal():
     for function in (
-        lambda: dqn_math.build_q_network(118, 5),
+        lambda: dqn_math.build_q_network(FEATURE_DIM, 5),
         lambda: dqn_math.prior({}, 1, [("SA", "HK")]),
         lambda: dqn_math.bayes_update({}, {}, 1),
         lambda: dqn_math.belief_features({}),
@@ -381,7 +401,7 @@ def test_open_functions_raise_and_play_stays_legal():
         decision.player_id,
     )
     assert action in decision.legal_actions
-    assert len(agent.encode(decision.observation)) == 118
+    assert len(agent.encode(decision.observation)) == agent.state_dim()
 
 
 def test_likelihood_query_records_the_opponent_policy():
@@ -396,3 +416,44 @@ def test_likelihood_query_records_the_opponent_policy():
     )
     assert recorded[("SA", "H2")][1] == 1.0
     assert hero.likelihoods[1][("SA", "H2")][0] == 0.0
+
+
+def _open_with_a_raise(environment, decision):
+    """Play checks until someone raises, then return the decision that faces it."""
+    while decision is not None:
+        legal = list(decision.legal_actions)
+        chosen = next((action for action in (3, 2, 4) if action in legal), None)
+        if chosen is not None:
+            return environment.step(chosen)
+        decision = environment.step(1 if 1 in legal else legal[0])
+    return None
+
+
+def test_one_raise_per_street_blocks_a_reraise_then_resets():
+    environment = NoLimitHoldemAdapter(
+        2, starting_stack=100, episode_mode="hand", max_raises=1
+    )
+    facing = _open_with_a_raise(environment, environment.reset(7))
+    assert facing is not None
+    assert not any(action in facing.legal_actions for action in (2, 3, 4))
+    assert 0 in facing.legal_actions or 1 in facing.legal_actions
+    # Calling closes the street. The next card starts a fresh raise count.
+    decision = environment.step(1 if 1 in facing.legal_actions else facing.legal_actions[0])
+    found_raise = False
+    while decision is not None:
+        if any(action in decision.legal_actions for action in (2, 3, 4)):
+            found_raise = True
+            break
+        decision = environment.step(
+            1 if 1 in decision.legal_actions else decision.legal_actions[0]
+        )
+    assert found_raise
+
+
+def test_zero_raises_per_street_stays_uncapped():
+    environment = NoLimitHoldemAdapter(
+        2, starting_stack=100, episode_mode="hand", max_raises=0
+    )
+    facing = _open_with_a_raise(environment, environment.reset(7))
+    assert facing is not None
+    assert any(action in facing.legal_actions for action in (2, 3, 4))

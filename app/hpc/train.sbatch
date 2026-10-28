@@ -30,6 +30,7 @@ args=(
   --small-blind "${SPARK_SMALL_BLIND:-1}"
   --big-blind "${SPARK_BIG_BLIND:-2}"
   --episode-mode "${SPARK_EPISODE_MODE:-session}"
+  --max-raises "${SPARK_MAX_RAISES:-0}"
 )
 if [[ -n "${SPARK_SEAT_CONFIG_B64:-}" ]]; then
   args+=(--seat-config-b64 "${SPARK_SEAT_CONFIG_B64}")

@@ -12,6 +12,22 @@ from typing import Any
 
 JOB_ID_PATTERN = re.compile(r"^(?P<id>\d+)(?:;.*)?$")
 SAFE_EXPORT_PATTERN = re.compile(r"^[A-Za-z0-9_./:@+=,-]+$")
+DEFAULT_ONDEMAND_URL = "https://dh-ood.hpc.msoe.edu"
+
+
+def ondemand_dashboard_url(
+    node: str,
+    port: int,
+    token: str,
+    *,
+    base: str = DEFAULT_ONDEMAND_URL,
+) -> str:
+    """Open OnDemand URL for the dashboard on a Rosie compute node.
+
+    Compute nodes are not reachable from a laptop. This ``/rnode/`` URL is the
+    address written to ``data/dashboard.url`` each time the web job starts.
+    """
+    return f"{base.rstrip('/')}/rnode/{node}/{int(port)}/?token={token}"
 
 
 class SlurmUnavailable(RuntimeError):
@@ -48,6 +64,7 @@ class SlurmClient:
             "SPARK_SMALL_BLIND": str(int(config.get("small_blind", 1))),
             "SPARK_BIG_BLIND": str(int(config.get("big_blind", 2))),
             "SPARK_EPISODE_MODE": str(config.get("episode_mode", "session")),
+            "SPARK_MAX_RAISES": str(max(0, int(config.get("max_raises", 0)))),
             "SPARK_EPISODES": str(config.get("episodes") or ""),
             "SPARK_AGENT_MEMORY_SIZE": str(
                 int(config.get("agent_memory_size", 100))

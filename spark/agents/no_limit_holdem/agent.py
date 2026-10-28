@@ -1,6 +1,6 @@
 """Shared No-Limit Hold'em observation contract.
 
-Every No-Limit agent can import the action names and the 118-number encoder
+Every No-Limit agent can import the action names and the observation encoder
 from here. Learning settings such as gamma live on each agent, not in this
 file. This module does not define an ``Agent`` subclass.
 
@@ -16,15 +16,20 @@ from typing import Any
 import rlcard
 
 # Vector layout. Indexes are part of the training contract; the README matches them.
+# Each card is three 0/1 flags (board, hole, opponent). All three zero means
+# the card is unseen. A linear layer then cannot treat "in the hand" as twice
+# "on the board".
 CARD_SLOTS = 52
-STREET_INDEX = 52
+CARD_LOCATIONS = 3
+CARD_FEATURE_DIM = CARD_SLOTS * CARD_LOCATIONS  # 156
+STREET_INDEX = CARD_FEATURE_DIM
 STREET_SLOTS = 4
-POT_INDEX = 56
-TO_CALL_INDEX = 57
-SEAT_INDEX = 58
+POT_INDEX = STREET_INDEX + STREET_SLOTS  # 160
+TO_CALL_INDEX = POT_INDEX + 1  # 161
+SEAT_INDEX = TO_CALL_INDEX + 1  # 162
 SEAT_STRIDE = 6
 MAX_SEATS = 10
-FEATURE_DIM = SEAT_INDEX + MAX_SEATS * SEAT_STRIDE  # 118
+FEATURE_DIM = SEAT_INDEX + MAX_SEATS * SEAT_STRIDE  # 222
 ACTION_DIM = 5
 
 SEAT_OCCUPIED = 0
@@ -34,12 +39,13 @@ SEAT_FOLDED = 3
 SEAT_ALL_IN = 4
 SEAT_BUTTON = 5
 
-# Card codes in the first 52 slots. CARD_OPPONENT only appears for a seat that
-# was given full vision ("Sees all cards" on the campaign form).
-CARD_UNSEEN = 0.0
-CARD_BOARD = 1.0
-CARD_HOLE = 2.0
-CARD_OPPONENT = 3.0
+# Channel offset inside a card's 3-flag block. At most one channel is 1.
+# All zeros means the card is unseen (still in the deck, or in a hidden
+# hand). CARD_OPPONENT is 1 only for a seat that was given full vision
+# ("Sees all cards").
+CARD_BOARD = 0
+CARD_HOLE = 1
+CARD_OPPONENT = 2
 
 ACTION_NAMES = {
     0: "fold",
@@ -60,16 +66,26 @@ def _card_index() -> dict[str, int]:
 CARD_INDEX = _card_index()
 
 
-def encode_public(public: dict[str, Any]) -> list[float]:
-    """Turn a ``public`` hand record into the fixed 118-number network input.
+def _mark_card(vector: list[float], card: str, location: int) -> None:
+    """Set one card's location flags so exactly ``location`` is 1."""
+    base = CARD_INDEX[str(card)] * CARD_LOCATIONS
+    for channel in range(CARD_LOCATIONS):
+        vector[base + channel] = 0.0
+    vector[base + int(location)] = 1.0
 
-    Cards use one slot each: 0 unseen, 1 on the board, 2 in the hero's hand,
-    3 in an opponent's hand (only present for a seat that was given full
-    vision; a normal seat never sees a 3).
-    Chip amounts are divided by the big blind. Seats are rotated so the acting
-    player is block 0, then the next seat to act, around the table. Unused
-    seats through seat block 9 stay zero, so a 2-player hand and a 10-player
-    hand share this length.
+
+def encode_public(public: dict[str, Any]) -> list[float]:
+    """Turn a ``public`` hand record into the fixed network input.
+
+    Each of the 52 cards is three 0/1 flags: board, hole, opponent. At most
+    one flag is 1. All three zero means the card is unseen. ``opponent_hole_cards``
+    is present only for a seat whose "Sees all cards" box is ticked; those
+    cards turn on the opponent flag. Other seats leave that flag at 0, so a
+    hidden card looks the same as a card still in the deck. The length does
+    not change. Chip amounts are divided by the big blind. Seats are rotated so
+    the acting player is block 0, then the next seat to act, around the table.
+    Unused seats through seat block 9 stay zero, so a 2-player hand and a
+    10-player hand share this length.
     """
     vector = [0.0] * FEATURE_DIM
     big_blind = float(public["big_blind"])
@@ -77,12 +93,12 @@ def encode_public(public: dict[str, Any]) -> list[float]:
         raise ValueError(f"big_blind must be positive, got {big_blind}.")
 
     for card in public.get("board") or []:
-        vector[CARD_INDEX[str(card)]] = CARD_BOARD
+        _mark_card(vector, str(card), CARD_BOARD)
     for card in public.get("hole_cards") or []:
-        vector[CARD_INDEX[str(card)]] = CARD_HOLE
+        _mark_card(vector, str(card), CARD_HOLE)
     for cards in (public.get("opponent_hole_cards") or {}).values():
         for card in cards or []:
-            vector[CARD_INDEX[str(card)]] = CARD_OPPONENT
+            _mark_card(vector, str(card), CARD_OPPONENT)
 
     stage = int(public.get("stage", 0))
     if 0 <= stage < STREET_SLOTS:
@@ -116,7 +132,7 @@ def encode_public(public: dict[str, Any]) -> list[float]:
 
 
 def encode_observation(observation: dict[str, Any]) -> list[float]:
-    """Read ``observation['public']`` and return the 118-number vector."""
+    """Read ``observation['public']`` and return the one-hot card vector."""
     public = observation.get("public")
     if not isinstance(public, dict):
         raise ValueError("No-Limit Hold'em requires observation['public'].")

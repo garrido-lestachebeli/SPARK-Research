@@ -111,6 +111,7 @@ class RLCardPokerAdapter(EnvironmentAdapter):
         max_hands: int = DEFAULT_MAX_HANDS,
         episode_mode: str = DEFAULT_EPISODE_MODE,
         full_vision_seats: Any = None,
+        max_raises: int = 0,
     ) -> None:
         self.num_players = int(num_players)
         self.small_blind = max(1, int(small_blind))
@@ -122,6 +123,9 @@ class RLCardPokerAdapter(EnvironmentAdapter):
                 f"{self.big_blind}."
             )
         self.episode_mode = normalize_episode_mode(episode_mode)
+        # 0 means a street may be raised without a cap. A positive number is
+        # the most raises allowed before the next card; calls and checks remain.
+        self.max_raises = max(0, int(max_raises))
         self.full_vision_seats: frozenset[int] = frozenset()
         self.set_full_vision_seats(full_vision_seats)
         # Single-hand mode always ends after the first hand, regardless of stack.
@@ -214,6 +218,7 @@ class RLCardPokerAdapter(EnvironmentAdapter):
         info["big_blind"] = self._big_blind
         info["episode_mode"] = self.episode_mode
         info["full_vision_seats"] = sorted(self.full_vision_seats)
+        info["max_raises"] = self.max_raises
         return info
 
     def _start_hand(self) -> Decision:
@@ -229,6 +234,7 @@ class RLCardPokerAdapter(EnvironmentAdapter):
         self._env = rlcard.make(self.rlcard_id, config=config)
         self._apply_blinds()
         self._state, self._player_id = self._env.reset()
+        self._install_raise_cap()
         game = getattr(self._env, "game", None)
         self._big_blind = float(getattr(game, "big_blind", self.big_blind) or self.big_blind)
         self._small_blind = float(
@@ -250,6 +256,50 @@ class RLCardPokerAdapter(EnvironmentAdapter):
         game.big_blind = int(self.big_blind)
         if hasattr(game, "raise_amount"):
             game.raise_amount = int(self.big_blind)
+
+    def _install_raise_cap(self) -> None:
+        """Stop further raises on a street once ``max_raises`` have been made.
+
+        ``0`` leaves RLCard's no-limit round unchanged. The blinds are not
+        raises. Half-pot, pot, and all-in each count as one. Check, call, and
+        fold stay legal. Limit and Leduc rounds do not use this hook.
+        """
+        if self.max_raises <= 0 or self._env is None:
+            return
+        game = getattr(self._env, "game", None)
+        betting = getattr(game, "round", None)
+        if betting is None or not hasattr(betting, "get_nolimit_legal_actions"):
+            return
+        cap = self.max_raises
+        betting._spark_raise_count = 0
+        original_start = betting.start_new_round
+        original_proceed = betting.proceed_round
+        original_legal = betting.get_nolimit_legal_actions
+
+        def _is_raise(action: Any) -> bool:
+            value = getattr(action, "value", action)
+            return int(value) in {2, 3, 4}
+
+        def start_new_round(game_pointer: int, raised: Any = None) -> Any:
+            betting._spark_raise_count = 0
+            return original_start(game_pointer, raised)
+
+        def proceed_round(players: Any, action: Any) -> Any:
+            raised = _is_raise(action)
+            pointer = original_proceed(players, action)
+            if raised:
+                betting._spark_raise_count += 1
+            return pointer
+
+        def get_nolimit_legal_actions(players: Any) -> list[Any]:
+            actions = list(original_legal(players))
+            if betting._spark_raise_count < cap:
+                return actions
+            return [action for action in actions if not _is_raise(action)]
+
+        betting.start_new_round = start_new_round
+        betting.proceed_round = proceed_round
+        betting.get_nolimit_legal_actions = get_nolimit_legal_actions
 
     def _record_action(self, seat: int, action: int, legal_actions: list[int]) -> None:
         game = getattr(self._env, "game", None)
@@ -289,6 +339,7 @@ class RLCardPokerAdapter(EnvironmentAdapter):
             "big_blind": self._big_blind,
             "episode_mode": self.episode_mode,
             "full_vision": self.sees_all_cards(player_id),
+            "max_raises": self.max_raises,
         }
         return Decision(
             player_id=int(player_id),
