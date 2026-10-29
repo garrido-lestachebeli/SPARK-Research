@@ -5,7 +5,8 @@ import json
 import pytest
 
 from spark.agents import create_agent
-from spark.agents.no_limit_holdem import dqn as dqn_math
+from spark.agents.no_limit_holdem import Bayesian_dqn as dqn_math
+from spark.agents.no_limit_holdem.dqn import HAND_FEATURE_DIM
 from spark.agents.no_limit_holdem.agent import (
     CARD_BOARD,
     CARD_HOLE,
@@ -378,15 +379,32 @@ def test_hypothetical_observation_shows_the_guessed_hand():
     assert view["public"]["to_call"] == 2.0
 
 
+def test_visible_dqn_uses_public_cards_and_not_opponent_beliefs():
+    agent = create_agent(
+        "no-limit-visible-dqn",
+        seed=0,
+        config={"seat_id": 0, "epsilon": 0.0},
+    )
+    assert not hasattr(agent, "belief")
+    assert agent.state_dim() == FEATURE_DIM + HAND_FEATURE_DIM
+    environment = NoLimitHoldemAdapter(2, starting_stack=50, episode_mode="hand")
+    decision = environment.reset(1)
+    encoded = agent.encode(decision.observation)
+    assert len(encoded) == agent.state_dim()
+    action = agent.select_action(
+        decision.observation,
+        list(decision.legal_actions),
+        decision.player_id,
+    )
+    assert action in decision.legal_actions
+    assert agent.q_network is not None
+    assert agent.q_network[0].in_features == agent.state_dim()
+
+
 def test_open_functions_raise_and_play_stays_legal():
-    for function in (
-        lambda: dqn_math.build_q_network(FEATURE_DIM, 5),
-        lambda: dqn_math.prior({}, 1, [("SA", "HK")]),
-        lambda: dqn_math.bayes_update({}, {}, 1),
-        lambda: dqn_math.belief_features({}),
-    ):
-        with pytest.raises(NotImplementedError):
-            function()
+    network = dqn_math.build_q_network(FEATURE_DIM, 5)
+    assert network[-1].out_features == 5
+    assert len(dqn_math.belief_features({})) == dqn_math.BELIEF_FEATURE_DIM
 
     environment = NoLimitHoldemAdapter(2, starting_stack=50, episode_mode="hand")
     decision = environment.reset(0)
