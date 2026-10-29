@@ -48,11 +48,15 @@ def build_q_network(state_dim: int, action_dim: int) -> Any:
     import torch.nn as nn
 
     return nn.Sequential(
-        nn.Linear(state_dim, 256),
+        nn.Linear(state_dim, 512),
         nn.ReLU(),
-        nn.Linear(256, 128),
-        nn.ReLU(),
-        nn.Linear(128, action_dim),
+        nn.Linear(512, 1024),
+        nn.LeakyReLU(),
+        nn.Linear(1024, 1024),
+        nn.LeakyReLU(),
+        nn.Linear(1024, 512),
+        nn.LeakyReLU(),
+        nn.Linear(512, action_dim),
     )
 
 
